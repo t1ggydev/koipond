@@ -7,6 +7,7 @@ Expected columns must contain schema metadata only, not application rows.
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import time
 import uuid
@@ -19,6 +20,7 @@ def run(argv, **kwargs):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-columns", required=True)
+    parser.add_argument("--expected-structure")
     args = parser.parse_args()
     expected = json.loads(Path(args.expected_columns).read_text())
     migrations = sorted((Path(__file__).resolve().parent.parent / "supabase/migrations").glob("*.sql"))
@@ -75,6 +77,26 @@ def main():
                           for field in ["udt_name", "is_nullable", "column_default"])]
         assert not (missing or extra or changed), json.dumps({"missing": missing, "extra": extra, "changed": changed})
 
+        structure_counts = {}
+        if args.expected_structure:
+            structure = json.loads(Path(args.expected_structure).read_text())
+            queries = {
+                "indexes": "SELECT tablename,indexname,indexdef FROM pg_catalog.pg_indexes "
+                           "WHERE schemaname='public' ORDER BY tablename,indexname",
+                "constraints": "SELECT c.relname AS table_name,k.conname AS constraint_name,"
+                               "k.contype AS constraint_type,pg_catalog.pg_get_constraintdef(k.oid) AS definition "
+                               "FROM pg_catalog.pg_constraint k JOIN pg_catalog.pg_class c ON c.oid=k.conrelid "
+                               "JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+                               "WHERE n.nspname='public' ORDER BY c.relname,k.conname",
+            }
+            def normalize(rows):
+                return [{field: re.sub(r"\bpublic\.", "", value) if isinstance(value, str) else value
+                         for field, value in row.items()} for row in rows]
+            for label, statement in queries.items():
+                rows = json.loads(sql("SELECT coalesce(json_agg(row_to_json(q)), '[]'::json) FROM (" + statement + ") q;").stdout)
+                assert normalize(rows) == normalize(structure[label]), label + " differ from hosted schema metadata"
+                structure_counts[label] = len(rows)
+
         secured = sql("SELECT count(*) FROM pg_catalog.pg_tables WHERE "
                       "schemaname='public' AND rowsecurity;").stdout.strip()
         assert secured == "8", "All eight app tables must have RLS enabled"
@@ -92,6 +114,7 @@ def main():
         print(json.dumps({"result": "PASS", "migrations": len(migrations),
                           "matching_columns": len(actual), "rls_tables": 8,
                           "realtime_publication": "draws", "anonymous_write_denied": True,
+                          "matching_structure": structure_counts,
                           "production_rows_copied": False, "network": "none"}), flush=True)
     finally:
         if created:
