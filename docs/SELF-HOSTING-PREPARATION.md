@@ -1,5 +1,9 @@
 # Koipond: isolated migration preparation
 
+Historical initial inventory. Its "local draft" and pending-work statements
+describe the first audit, not current deployment status. See PROJECT.md,
+DEPLOYMENT.md and GO-LIVE.md for the subsequently implemented and tested state.
+
 Status 2026-11-19: local draft only. No push, cloud deployment, production
 service configuration, production SQL writes, DNS change or EventSub mutation.
 

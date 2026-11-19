@@ -1,131 +1,48 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "Bestehendes Prometheus",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "id": null,
-  "uid": "koipond-staging",
-  "title": "Koipond · Staging",
+  "uid": "koipond-stage",
+  "title": "Koipond \u00b7 Staging",
   "tags": [
     "koipond",
-    "staging",
-    "preparation"
+    "staging"
   ],
-  "description": "Vorbereiteter Import für die bestehende Monitoring-Plattform; globale DB-Zähler niemals über Instanzen summieren. Keine Konfiguration ist damit bereits produktiv angewendet.",
+  "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
-  "editable": true,
-  "timezone": "browser",
   "refresh": "15s",
+  "editable": false,
   "time": {
     "from": "now-1h",
     "to": "now"
   },
-  "templating": {
-    "list": [
-      {
-        "name": "job",
-        "label": "Job",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "refresh": 1,
-        "query": {
-          "query": "label_values(koipond_process_uptime_seconds, job)",
-          "refId": "job"
-        },
-        "current": {
-          "text": "koipond-staging",
-          "value": "koipond-staging",
-          "selected": true
-        },
-        "options": [
-          {
-            "text": "koipond-staging",
-            "value": "koipond-staging",
-            "selected": true
-          }
-        ],
-        "multi": false,
-        "includeAll": false,
-        "sort": 1
-      },
-      {
-        "name": "instance",
-        "label": "Instanz",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "refresh": 2,
-        "query": {
-          "query": "label_values(koipond_process_uptime_seconds{job=~\"${job:regex}\"}, instance)",
-          "refId": "instance"
-        },
-        "current": {
-          "text": "All",
-          "value": "$__all",
-          "selected": true
-        },
-        "options": [],
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "sort": 1
-      }
-    ]
-  },
   "panels": [
     {
       "id": 1,
-      "type": "text",
-      "title": "Vorbereitung – noch nicht installiert",
+      "title": "Erreichbare Webinstanzen (Soll: 2)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 24,
-        "h": 3
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Erst nach Bereitstellung des privaten Staging-Endpunkts importieren und anwenden. **Globale Datenbankmetriken werden mit `max()` statt `sum()` über Instanzen ausgewertet.** Der Instanzfilter gilt für HTTP/Prozessmetriken; globale Werte gelten für den gesamten gewählten Job. Aktive Nutzer: eindeutige angemeldete Nutzer im 5-Minuten-Fenster, keine Twitch-Zuschauerzählung. Fehlende Messungen bleiben sichtbar und werden nicht als künstliche Nutzer-/Zähler-Nullwerte ersetzt."
-      }
-    },
-    {
-      "id": 2,
-      "type": "stat",
-      "title": "Requests / Sekunde",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 3,
         "w": 4,
         "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(koipond_http_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
-          "instant": true,
-          "range": false
+          "expr": "sum(up{job=\"koipond_stage\"}) or vector(0)",
+          "legendFormat": "{{instance}}",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "decimals": 2,
-          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -146,40 +63,94 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Anwendung bereit",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(max(koipond_stage_readiness{environment=\"staging\"}) or vector(0)) * ((time() - (max(koipond_stage_readiness_last_probe_timestamp_seconds{environment=\"staging\"}) or vector(0))) < bool 60)",
+          "legendFormat": "{{instance}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
         "justifyMode": "auto"
       }
     },
     {
       "id": 3,
+      "title": "Aktive angemeldete Nutzer \u00b7 5 Min.",
       "type": "stat",
-      "title": "HTTP 5xx-Quote",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 4,
-        "y": 3,
+        "x": 8,
+        "y": 0,
         "w": 4,
         "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "((sum(rate(koipond_http_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\",status=~\"5..\"}[$__rate_interval]))) or (0 * sum(rate(koipond_http_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))) / clamp_min(sum(rate(koipond_http_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])), 1e-9)",
-          "instant": true,
-          "range": false
+          "expr": "max(koipond_active_users{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "decimals": 2,
-          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -200,40 +171,40 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "auto"
       }
     },
     {
       "id": 4,
+      "title": "Aktive Streamer \u00b7 5 Min.",
       "type": "stat",
-      "title": "HTTP p95",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 8,
-        "y": 3,
+        "x": 12,
+        "y": 0,
         "w": 4,
         "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
-          "instant": true,
-          "range": false
+          "expr": "max(koipond_active_streamers{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "decimals": 2,
-          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -254,194 +225,30 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "auto"
       }
     },
     {
       "id": 5,
+      "title": "Requests / Sekunde",
       "type": "stat",
-      "title": "Aktive Nutzer · global",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 3,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max(koipond_active_users{job=~\"${job:regex}\"})",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      }
-    },
-    {
-      "id": 6,
-      "type": "stat",
-      "title": "Aktive Streamer · global",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 16,
-        "y": 3,
+        "y": 0,
         "w": 4,
         "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(koipond_active_streamers{job=~\"${job:regex}\"})",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      }
-    },
-    {
-      "id": 7,
-      "type": "stat",
-      "title": "Erreichbare Instanzen",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 3,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(up{job=~\"${job:regex}\",instance=~\"${instance:regex}\"})",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      }
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "HTTP-Requests nach Instanz",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 7,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (instance) (rate(koipond_http_requests_total{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+          "expr": "sum(rate(koipond_http_requests_total{job=\"koipond_stage\"}[5m]))",
           "legendFormat": "{{instance}}",
           "range": true
         }
@@ -449,14 +256,125 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Antwortzeit p95",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=\"koipond_stage\"}[5m])))",
+          "legendFormat": "{{instance}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Requests nach HTTP-Status",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(koipond_http_requests_total{job=\"koipond_stage\"}[5m]))",
+          "legendFormat": "{{status}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
@@ -464,10 +382,64 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ]
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Latenzen p50 / p95",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=\"koipond_stage\"}[5m])))",
+          "legendFormat": "p95",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=\"koipond_stage\"}[5m])))",
+          "legendFormat": "p50",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
@@ -477,230 +449,256 @@
     },
     {
       "id": 9,
-      "type": "timeseries",
-      "title": "HTTP-Latenz",
-      "description": "",
+      "title": "Wartende Ereignisse",
+      "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 7,
-        "w": 12,
-        "h": 8
+        "x": 0,
+        "y": 12,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
-          "legendFormat": "p95 gesamt",
-          "range": true
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(koipond_http_request_duration_seconds_bucket{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval])))",
-          "legendFormat": "p50 gesamt",
+          "expr": "max(koipond_queue_pending{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
       }
     },
     {
       "id": 10,
-      "type": "timeseries",
-      "title": "Warteschlange · global",
-      "description": "Jede Instanz meldet dieselbe Datenbank-Warteschlange: max statt Summierung.",
+      "title": "In Verarbeitung",
+      "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
-        "y": 15,
-        "w": 12,
-        "h": 8
+        "x": 6,
+        "y": 12,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(koipond_queue_pending{job=~\"${job:regex}\"})",
-          "legendFormat": "wartend",
-          "range": true
-        },
-        {
-          "refId": "B",
-          "expr": "max(koipond_queue_processing{job=~\"${job:regex}\"})",
-          "legendFormat": "in Verarbeitung",
-          "range": true
-        },
-        {
-          "refId": "C",
-          "expr": "max(koipond_queue_dead{job=~\"${job:regex}\"})",
-          "legendFormat": "endgültig fehlgeschlagen",
+          "expr": "max(koipond_queue_processing{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
       }
     },
     {
       "id": 11,
-      "type": "timeseries",
-      "title": "Ältestes wartendes Ereignis · global",
-      "description": "",
+      "title": "Fehlgeschlagene Ereignisse",
+      "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 15,
-        "w": 12,
-        "h": 8
+        "y": 12,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(koipond_queue_oldest_age_seconds{job=~\"${job:regex}\"})",
-          "legendFormat": "Alter",
+          "expr": "max(koipond_queue_dead{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "title": "\u00c4ltestes Ereignis",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 12,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(koipond_queue_oldest_age_seconds{job=\"koipond_stage\"})",
+          "legendFormat": "{{instance}}",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
       }
     },
     {
-      "id": 12,
+      "id": 13,
+      "title": "Verarbeitete Ereignisse / Sekunde",
       "type": "timeseries",
-      "title": "Ereignisse / Sekunde · global",
-      "description": "Rates werden pro beobachteter Instanz berechnet und mit max ausgewählt; replizierte globale Zähler werden nicht summiert.",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 23,
+        "y": 16,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "max(rate(koipond_events_received_total{job=~\"${job:regex}\"}[$__rate_interval]))",
-          "legendFormat": "angenommen",
-          "range": true
-        },
-        {
-          "refId": "B",
-          "expr": "max(rate(koipond_events_completed_total{job=~\"${job:regex}\"}[$__rate_interval]))",
-          "legendFormat": "abgeschlossen",
-          "range": true
-        },
-        {
-          "refId": "C",
-          "expr": "max(rate(koipond_events_retried_total{job=~\"${job:regex}\"}[$__rate_interval]))",
-          "legendFormat": "wiederholt",
-          "range": true
-        },
-        {
-          "refId": "D",
-          "expr": "max(rate(koipond_events_duplicate_total{job=~\"${job:regex}\"}[$__rate_interval]))",
-          "legendFormat": "Duplikate",
+          "expr": "max(rate(koipond_events_completed_total{job=\"koipond_stage\"}[5m]))",
+          "legendFormat": "global verarbeitet",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
@@ -708,80 +706,7 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 13,
-      "type": "timeseries",
-      "title": "Ereigniszähler · global",
-      "description": "Echte persistente Datenbankzähler; keine künstlichen Reset- oder Nullwerte.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 23,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max(koipond_events_received_total{job=~\"${job:regex}\"})",
-          "legendFormat": "angenommen",
-          "range": true
-        },
-        {
-          "refId": "B",
-          "expr": "max(koipond_events_completed_total{job=~\"${job:regex}\"})",
-          "legendFormat": "abgeschlossen",
-          "range": true
-        },
-        {
-          "refId": "C",
-          "expr": "max(koipond_events_retried_total{job=~\"${job:regex}\"})",
-          "legendFormat": "wiederholt",
-          "range": true
-        },
-        {
-          "refId": "D",
-          "expr": "max(koipond_events_duplicate_total{job=~\"${job:regex}\"})",
-          "legendFormat": "Duplikate",
-          "range": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ]
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
@@ -791,38 +716,40 @@
     },
     {
       "id": 14,
+      "title": "Prozessspeicher je Webinstanz",
       "type": "timeseries",
-      "title": "CPU je Instanz · Kerne",
-      "description": "CPU-Sekunden pro Sekunde entsprechen belegten CPU-Kernen (0,5 = ein halber Kern).",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
-        "y": 31,
+        "x": 12,
+        "y": 16,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (instance) (rate({__name__=~\"koipond_process_cpu_(user|system)_seconds_total\",job=~\"${job:regex}\",instance=~\"${instance:regex}\"}[$__rate_interval]))",
+          "expr": "koipond_process_resident_memory_bytes{job=\"koipond_stage\"}",
           "legendFormat": "{{instance}}",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
@@ -830,10 +757,7 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ]
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
@@ -843,44 +767,40 @@
     },
     {
       "id": 15,
+      "title": "CPU je Webinstanz",
       "type": "timeseries",
-      "title": "Arbeitsspeicher je Instanz",
-      "description": "",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 31,
+        "x": 0,
+        "y": 24,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "koipond_process_resident_memory_bytes{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}",
-          "legendFormat": "{{instance}} RSS",
-          "range": true
-        },
-        {
-          "refId": "B",
-          "expr": "koipond_process_heap_used_bytes{job=~\"${job:regex}\",instance=~\"${instance:regex}\"}",
-          "legendFormat": "{{instance}} Heap",
+          "expr": "rate(koipond_process_cpu_user_seconds_total{job=\"koipond_stage\"}[5m]) + rate(koipond_process_cpu_system_seconds_total{job=\"koipond_stage\"}[5m])",
+          "legendFormat": "{{instance}}",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "showPoints": "never",
-            "spanNulls": false,
-            "axisCenteredZero": false
+          "unit": "cores",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
           }
         },
         "overrides": []
@@ -888,10 +808,7 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
-          ]
+          "placement": "bottom"
         },
         "tooltip": {
           "mode": "multi",
@@ -901,42 +818,38 @@
     },
     {
       "id": 16,
-      "type": "stat",
-      "title": "Letzter erfolgreicher Statistiklauf · global",
+      "title": "Wiederholungen / Duplikate pro Sekunde",
+      "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 0,
-        "y": 39,
-        "w": 8,
-        "h": 4
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "1000 * max(koipond_stats_last_success_timestamp_seconds{job=~\"${job:regex}\"})",
-          "instant": true,
-          "range": false
+          "expr": "max(rate(koipond_events_retried_total{job=\"koipond_stage\"}[5m]))",
+          "legendFormat": "Wiederholungen",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "max(rate(koipond_events_duplicate_total{job=\"koipond_stage\"}[5m]))",
+          "legendFormat": "Duplikate",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "dateTimeAsIso",
-          "decimals": 2,
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "Noch kein erfolgreicher Lauf",
-                  "color": "yellow",
-                  "index": 0
-                }
-              }
-            }
-          ],
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -950,102 +863,44 @@
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
       "id": 17,
+      "title": "Letzte Stage-Sicherung: Alter",
       "type": "stat",
-      "title": "Alter des Statistik-Erfolgs · global",
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "prometheus"
       },
       "gridPos": {
-        "x": 8,
-        "y": 39,
+        "x": 0,
+        "y": 32,
         "w": 8,
-        "h": 4
+        "h": 5
       },
       "targets": [
         {
           "refId": "A",
-          "expr": "time() - max(koipond_stats_last_success_timestamp_seconds{job=~\"${job:regex}\"} > 0)",
-          "instant": true,
-          "range": false
+          "expr": "time() - max(koipond_supabase_backup_last_success_timestamp_seconds)",
+          "legendFormat": "{{instance}}",
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "decimals": 2,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
+          "color": {
+            "mode": "palette-classic"
           },
-          "noValue": "Noch kein erfolgreicher Lauf"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      }
-    },
-    {
-      "id": 18,
-      "type": "stat",
-      "title": "Fehlgeschlagene Statistikläufe · global",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 39,
-        "w": 8,
-        "h": 4
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max(koipond_stats_failures_total{job=~\"${job:regex}\"})",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "decimals": 0,
-          "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1066,12 +921,134 @@
           "fields": "",
           "values": false
         },
-        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "value",
-        "graphMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 18,
+      "title": "Stage-Sicherung: Gr\u00f6\u00dfe",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 32,
+        "w": 8,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(koipond_supabase_backup_size_bytes)",
+          "legendFormat": "{{instance}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 19,
+      "title": "Stage-Sicherung erfolgreich",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 32,
+        "w": 8,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(koipond_supabase_backup_last_run_success)",
+          "legendFormat": "{{instance}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
         "justifyMode": "auto"
       }
     }
-  ]
+  ],
+  "links": [
+    {
+      "title": "Private Stage \u00f6ffnen",
+      "url": "https://koipond-stage.kluge-it.tech",
+      "type": "link",
+      "targetBlank": true
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "description": "Private Koipond-Testumgebung. Nutzer- und Queuewerte sind global und werden mit max dedupliziert. HTTP-/Prozesswerte stammen aus zwei festen Instanzzielen. Fehlende Daten werden nicht als null Nutzer interpretiert."
 }

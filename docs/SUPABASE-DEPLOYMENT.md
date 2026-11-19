@@ -48,7 +48,7 @@ For real recovery, stop all application writers, restore the globals and both da
 
 `full-restore-verification.json` on supabase01: both local database dumps and globals restored successfully in isolation, configuration hashes matched, application counts and permissions passed.
 
-Still required before production approval: staged app/worker integration with these own keys; TLS/private edge wiring; fresh migration snapshot/reconciliation; prepared external URL and OAuth callback validation without changing active production callbacks; verified PBS snapshot; end-to-end staged application checks; then the user's explicit go-live approval. Existing Vercel/Cloud and productive Twitch subscriptions remain active throughout preparation.
+Subsequent private app/worker integration, TLS edge wiring and real REST/Realtime acceptance checks passed. Fresh migration snapshot/reconciliation, production DNS/TLS access and real canonical OAuth smoke checks remain gated by the final Go-live procedure in GO-LIVE.md. Existing Vercel/Cloud and productive Twitch subscriptions remain active throughout preparation.
 
 ### Backup monitoring
 
@@ -61,3 +61,17 @@ The monitored backup deployment was checked through Ansible: initial run succeed
 The deployed application smoke test passed16 checks on2026-11-19 after waiting for Realtime's `system` event with `extension=postgres_changes` and `status=ok`. A channel reporting `SUBSCRIBED` alone did not establish that the database change subscription was ready; inserting immediately caused an initial delivery timeout. After the readiness event, both a real WebSocket broadcast and an anonymous `postgres_changes` INSERT notification arrived. The synthetic unscoped draw was removed in cleanup.
 
 Server-side inspection confirmed `wal_level=logical`, publication `supabase_realtime` containing `public.draws`, active wal2json and Broadcast pgoutput slots, anonymous SELECT privileges and the expected draws read policy. No replication error was observed. No server configuration or permissions were changed for this investigation; the test now waits for actual replication readiness.
+
+### Explicitly approved final synchronization (prepared, not executed)
+
+The controller helper `work/supabase-source/deploy/supabase/restore-snapshot.py` accepts `--backup` and `--key-vault` paths, which must resolve to existing files underneath the controller's `recovery/koipond` directory. The original encrypted snapshot/key are preserved. Normal invocation still refuses to overwrite differing application data.
+
+Replacement is available only when **both** `--final-sync` and `--go-live-approved` are supplied after the user's final approval. The encrypted payload checksum, AES-GCM integrity, payload format, migration SQL checksums, source project, eight-table set,85 baseline columns and per-table row/hash manifests are checked. A final snapshot must additionally contain `write_fence: true`; the source export must establish this from revoked DML privileges for anon/authenticated/service_role. The currently available read-only Cloud credentials cannot establish that write fence; an appropriately authorized SQL credential is required at the final gate. No Cloud freeze or final synchronization has been performed.
+
+Before any replacement the helper uses pinned SSH to apps01 and requires the root-owned0600 `/srv/koipond-staging/final-sync-quiesced` marker. No container from either `koipond-staging` or `koipond-production` may be running, and both stage/production statistics timers and services must be inactive. It then creates a fresh complete local Supabase backup, verifies quiescence again and starts the database transaction.
+
+The SQL generator `restore_sql.py` locks all eight application tables and loads the incoming data into temporary typed tables. It verifies their canonical PostgreSQL JSON hashes **before** truncating application tables. In that same transaction it replaces only the eight public application tables using explicit baseline columns and resets only the private staging events/channels/presence/leases/task_runs/counters state. Platform schemas, the migration ledger, tables/indexes/privileges and new source_event_id columns remain intact. Any mismatch rolls back; the prior local complete backup and encrypted source artifacts remain available. Successful evidence records the source snapshot and the pre-sync local backup path.
+
+`test-final-sync.py` exercised this generator against a full backup restored into disposable PostgreSQL17 (`--network none`, no ports, tmpfs). Missing write_fence was rejected; a deliberately wrong manifest failed without altering existing rows; a valid replacement preserved all application counts, platform schemas and17 migration records while clearing a synthetic lease and resetting counters. This test passed. It never called the real final-sync helper or replaced the running stage database.
+
+After final approval, run the prepared quiesce play, obtain a fresh write-fenced encrypted source export and invoke the helper with the selected recovery file paths and both approval flags. Only after a successful final-sync evidence file may production activation proceed. Do not resume stage writers after this point; production and stage must never write concurrently to the same database.

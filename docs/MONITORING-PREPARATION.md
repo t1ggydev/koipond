@@ -1,5 +1,12 @@
 # Koipond monitoring draft
 
+Historical instrumentation design. The private integration is now deployed on
+the existing monitoring VM: job koipond_stage, two fixed per-instance HTTPS
+scrapes, dashboard koipond-stage and six Grafana alerts using the existing
+Telegram contact point. Readiness and database-backup health use the existing
+node exporter. The deployed dashboard and rules are mirrored in deploy/monitoring.
+See MONITORING-PROMOTION.md for the inactive production-promotion procedure.
+
 Nothing in this document changes the existing Prometheus/Grafana installation.
 
 ## Implemented locally

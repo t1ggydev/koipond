@@ -1,25 +1,35 @@
-# DRAFT ONLY. Merge into the existing Prometheus configuration only after the
-# private staging endpoint, valid TLS certificate and secret file are ready.
-# No production or public DNS record is created by this file.
+# Matches the deployed private job. Merge into existing configuration; never replace it.
 # Globally replicated database metrics must use max(), NEVER sum over instances.
 scrape_configs:
-  - job_name: koipond-staging
+  - job_name: koipond_stage
     scrape_interval: 15s
     scrape_timeout: 5s
     scheme: https
     metrics_path: /api/internal/metrics
     authorization:
       type: Bearer
-      credentials_file: /etc/prometheus/secrets/koipond-staging-token
+      credentials_file: /etc/prometheus/koipond-stage/monitoring.token
+    tls_config:
+      server_name: koipond-stage.kluge-it.tech
+      min_version: TLS12
     static_configs:
       - targets:
-          - koipond-staging.internal:443
+          - koipond-stage.kluge-it.tech:443
         labels:
+          instance: web1
           environment: staging
           application: koipond
+          __metrics_path__: /api/internal/metrics/instance1
+      - targets:
+          - koipond-stage.kluge-it.tech:443
+        labels:
+          instance: web2
+          environment: staging
+          application: koipond
+          __metrics_path__: /api/internal/metrics/instance2
     # TLS certificate verification remains enabled. If an internal CA is used,
     # explicitly install that CA; do not set insecure_skip_verify.
 
 # Merge with the existing rule_files list; do not replace other applications.
 rule_files:
-  - /etc/prometheus/rules/koipond-alerts-staging.yml
+  - /etc/prometheus/rules/koipond-stage.yml
