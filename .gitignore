@@ -43,6 +43,7 @@ next-env.d.ts
 
 .vercel
 .env*.local
+/deploy/*.env
 
 # written by `next dev`
 AGENTS.md
