@@ -49,3 +49,9 @@ For real recovery, stop all application writers, restore the globals and both da
 `full-restore-verification.json` on supabase01: both local database dumps and globals restored successfully in isolation, configuration hashes matched, application counts and permissions passed.
 
 Still required before production approval: staged app/worker integration with these own keys; TLS/private edge wiring; fresh migration snapshot/reconciliation; prepared external URL and OAuth callback validation without changing active production callbacks; verified PBS snapshot; end-to-end staged application checks; then the user's explicit go-live approval. Existing Vercel/Cloud and productive Twitch subscriptions remain active throughout preparation.
+
+### Backup monitoring
+
+The root backup runner atomically publishes `/var/lib/prometheus/node-exporter/koipond-supabase-backup.prom` with mode0644. It contains no credentials or database contents. Gauges are `koipond_supabase_backup_last_success_timestamp_seconds`, `koipond_supabase_backup_size_bytes` and `koipond_supabase_backup_last_run_success`. A run marks success0 before starting its backup work; only completed archive publication changes it to1 and advances success time/size. Failure or interruption preserves the preceding successful timestamp and size. These metrics describe this self-hosted **staging** stack, not the still-active Cloud production database. Existing centralized Prometheus/Grafana collect them through node_exporter; the monitoring agent maintains the associated age/failure panels and alerts.
+
+The monitored backup deployment was checked through Ansible: initial run succeeded, all three gauges were present, last_run_success=1 and the textfile mode was0644. The backup archive and protected runtime environment retain their restrictive root permissions.
