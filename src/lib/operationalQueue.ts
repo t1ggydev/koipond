@@ -11,7 +11,7 @@ export type ChatEvent = {
   chatter_user_login: string;
   chatter_user_name: string;
   message_id?: string;
-  message: { text: string; fragments?: { type: string; text: string; emote?: { id: string } }[] };
+  message: { text: string; fragments?: { type: string; text: string; emote?: { id: string } | null }[] };
   color?: string;
   badges: { set_id: string }[];
 };

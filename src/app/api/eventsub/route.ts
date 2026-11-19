@@ -14,7 +14,7 @@ const chat = z.object({
   message_id: z.string().max(200).optional(), color: z.string().max(50).optional(),
   message: z.object({ text: z.string().max(10000), fragments: z.array(z.object({
     type: z.string().max(100), text: z.string().max(10000),
-    emote: z.object({ id: z.string().max(200) }).optional(),
+    emote: z.object({ id: z.string().max(200) }).nullish(),
   })).max(500).optional() }),
   badges: z.array(z.object({ set_id: z.string().max(100) })).max(100),
 });
@@ -49,6 +49,9 @@ export async function POST(request: NextRequest) {
   }
   let body;
   try { body = JSON.parse(rawBody); } catch { return new NextResponse("invalid JSON", { status: 400 }); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return new NextResponse("invalid event envelope", { status: 400 });
+  }
   const type = request.headers.get("Twitch-Eventsub-Message-Type");
   if (type === "webhook_callback_verification") {
     return typeof body.challenge === "string" && body.challenge.length <= 2048
