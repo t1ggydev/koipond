@@ -47,7 +47,7 @@ pipeline {
           printf '%s\n' "$revision" > "$root/state/revision"
           printf '%s\n' "$image_ref" > "$root/state/image-ref"
           KOIPOND
-        '''.stripIndent()
+        '''.stripIndent(10)
       }
     }
     stage('Deploy private staging only') {
@@ -70,7 +70,7 @@ pipeline {
             -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
             -e "koipond_image_ref=$image_ref" -e koipond_deploy_staging=true
           KOIPOND
-        '''.stripIndent()
+        '''.stripIndent(10)
       }
     }
   }
