@@ -29,8 +29,16 @@ change, production SQL, DNS change or EventSub subscription mutation.
 - Isolated standalone runtime on loopback passed: liveness 200, unauthenticated
   admin entries 403, unconfigured cron 503, disabled demo API 404.
 - Runtime process was stopped after checks.
-- Docker Desktop Linux engine is not running locally. Docker image and Linux
-  behavior are NOT validated yet. No daemon or service was started to work around this.
+- Docker Desktop Linux engine is not running locally. Ansible built the draft on
+  the existing apps01 Docker engine instead, with no production secrets.
+- Linux image koipond-prep:d81ab2eeb34d (amd64) built successfully:
+  sha256:9a42b815b784d093a30f392b01002d0ef0470c8769503c781c8a6bca4f90361e.
+- Disposable Linux smoke container passed the same four endpoint checks with
+  network=none, no published ports, a memory/CPU limit and non-root user node.
+- Test container and owned temporary source directory were removed. Only the
+  preparation image/build cache remain on apps01. No persistent app service runs.
+- Compose draft syntax validated with --no-env-resolution and the example file;
+  a real staging environment file has deliberately not been created.
 - Compose staging configuration binds only to loopback, has no scheduler, and
   expects an independent staging database and test-only OAuth/webhook credentials.
 - Production secrets must never be build arguments. NEXT_PUBLIC_* values are
