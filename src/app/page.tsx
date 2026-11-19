@@ -1,6 +1,7 @@
 import { BackgroundGlow, SourceLink, buttonClass, cardClass } from "@/components/ui";
 import { countLinkedParticipants } from "@/lib/participants";
-export const revalidate = 600;
+// Keep the database count consistent across instances without a shared ISR cache.
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const linked = await countLinkedParticipants();
