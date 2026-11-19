@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { fetchOsuStats } from "@/lib/osu";
 import { saveOsuStats } from "@/lib/participants";
+import { randomUUID } from "node:crypto";
+import { acquireLease, releaseLease, durableEventsEnabled } from "@/lib/operationalQueue";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -21,7 +23,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function GET(req: NextRequest) {
+async function refresh(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json({ error: "CRON_SECRET is not set" }, { status: 503 });
@@ -78,4 +80,31 @@ export async function GET(req: NextRequest) {
   };
   console.log("osu! stats refresh:", JSON.stringify(result));
   return NextResponse.json(result);
+}
+
+export async function GET(req: NextRequest) {
+  if (!durableEventsEnabled()) return refresh(req);
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return NextResponse.json({ error: "not configured" }, { status: 503 });
+  if (req.headers.get("authorization") !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "not authorized" }, { status: 401 });
+  }
+  const owner = randomUUID();
+  let acquired;
+  try { acquired = await acquireLease("osu_stats", owner, 600); }
+  catch { return NextResponse.json({ error: "scheduler unavailable" }, { status: 503 }); }
+  if (!acquired) return NextResponse.json({ skipped: true, reason: "already running" }, { status: 409 });
+  try {
+    const response = await refresh(req);
+    const result = await response.clone().json();
+    await supabaseAdmin().rpc("koi_record_task_run", {
+      p_name: "osu_stats", p_success: response.ok && result.failed === 0,
+    }).throwOnError();
+    return response;
+  } catch {
+    await supabaseAdmin().rpc("koi_record_task_run", { p_name: "osu_stats", p_success: false });
+    return NextResponse.json({ error: "stats refresh failed" }, { status: 503 });
+  } finally {
+    await releaseLease("osu_stats", owner).catch(() => console.error("Stats lease release failed"));
+  }
 }

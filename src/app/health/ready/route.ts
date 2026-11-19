@@ -1,4 +1,5 @@
 import { requireMonitoringAccess } from "@/lib/monitoringAuth";
+import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,8 +29,16 @@ export async function GET(request: Request) {
     }
   }
 
+  let queue = true;
+  if (database && process.env.KOIPOND_DURABLE_EVENTS === "true") {
+    try {
+      const { error } = await supabaseAdmin().rpc("koi_operational_metrics")
+        .abortSignal(AbortSignal.timeout(2000));
+      queue = !error;
+    } catch { queue = false; }
+  }
   return Response.json(
-    { status: database ? "ready" : "unavailable", checks: { database } },
-    { status: database ? 200 : 503, headers },
+    { status: database && queue ? "ready" : "unavailable", checks: { database, queue } },
+    { status: database && queue ? 200 : 503, headers },
   );
 }

@@ -1,189 +1,77 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { env } from "@/lib/env";
 import { isDuplicateMessage, isFreshMessage, verifyEventSubSignature } from "@/lib/eventsubVerify";
-import { sendTwitchChatMessage } from "@/lib/twitch";
-import { loadCriteria, pickWinner, recordNumberWinner } from "@/lib/draw";
-import { claimSecretNumber, getEntrySettings, parseGuess, tryAddEntry } from "@/lib/entries";
-import { captureWinnerMessage } from "@/lib/winnerChat";
-import { broadcastToStreamer } from "@/lib/realtimeBroadcast";
+import { durableEventsEnabled, enqueueEvent } from "@/lib/operationalQueue";
+import { processChatEvent } from "@/lib/eventsubProcessor";
 import { getStreamerByTwitchId } from "@/lib/streamers";
+import { getEntrySettings } from "@/lib/entries";
 
-type MessageFragment = {
-  type: string;
-  text: string;
-  emote?: { id: string };
-};
+const chat = z.object({
+  broadcaster_user_id: z.string().regex(/^\d{1,30}$/),
+  chatter_user_id: z.string().regex(/^\d{1,30}$/),
+  chatter_user_login: z.string().max(100), chatter_user_name: z.string().max(200),
+  message_id: z.string().max(200).optional(), color: z.string().max(50).optional(),
+  message: z.object({ text: z.string().max(10000), fragments: z.array(z.object({
+    type: z.string().max(100), text: z.string().max(10000),
+    emote: z.object({ id: z.string().max(200) }).optional(),
+  })).max(500).optional() }),
+  badges: z.array(z.object({ set_id: z.string().max(100) })).max(100),
+});
 
-type ChatMessageEvent = {
-  broadcaster_user_id: string;
-  chatter_user_id: string;
-  chatter_user_login: string;
-  chatter_user_name: string;
-  message_id?: string;
-  message: { text: string; fragments?: MessageFragment[] };
-  color?: string;
-  badges: { set_id: string }[];
-};
-
-function chatPayload(event: ChatMessageEvent) {
-  const fragments = (event.message.fragments ?? [{ type: "text", text: event.message.text }]).map(
-    (fragment) => ({
-      text: fragment.text,
-      emoteUrl: fragment.emote?.id
-        ? `https://static-cdn.jtvnw.net/emoticons/v2/${fragment.emote.id}/default/dark/2.0`
-        : undefined,
-    }),
-  );
-
-  return {
-    id: event.message_id ?? `${event.chatter_user_id}-${Date.now()}`,
-    login: event.chatter_user_login,
-    name: event.chatter_user_name,
-    color: event.color || null,
-    badges: (event.badges ?? []).map((b) => b.set_id),
-    fragments,
-  };
+async function boundedBody(request: Request) {
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 262144) { await reader.cancel(); throw new Error("too_large"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-function isAuthorized(event: ChatMessageEvent, streamerTwitchId: string): boolean {
-  if (event.chatter_user_id === streamerTwitchId) return true;
-  return event.badges?.some((b) => b.set_id === "moderator" || b.set_id === "broadcaster") ?? false;
-}
-
-export async function POST(req: NextRequest) {
-  const rawBody = await req.text();
-
-  const messageId = req.headers.get("Twitch-Eventsub-Message-Id") ?? "";
-  const timestamp = req.headers.get("Twitch-Eventsub-Message-Timestamp") ?? "";
-  const signature = req.headers.get("Twitch-Eventsub-Message-Signature");
-  const messageType = req.headers.get("Twitch-Eventsub-Message-Type");
-
-  const valid = verifyEventSubSignature(
-    { messageId, timestamp, signature },
-    rawBody,
-    env.twitchEventSubSecret,
-  );
-  if (!valid) {
-    return new NextResponse("invalid signature", { status: 403 });
+export async function POST(request: NextRequest) {
+  let rawBody: string;
+  try { rawBody = await boundedBody(request); }
+  catch { return new NextResponse("invalid body", { status: 413 }); }
+  const messageId = request.headers.get("Twitch-Eventsub-Message-Id") ?? "";
+  const timestamp = request.headers.get("Twitch-Eventsub-Message-Timestamp") ?? "";
+  if (!messageId || messageId.length > 200 || !verifyEventSubSignature({
+    messageId, timestamp, signature: request.headers.get("Twitch-Eventsub-Message-Signature"),
+  }, rawBody, env.twitchEventSubSecret) || !isFreshMessage(timestamp)) {
+    return new NextResponse("invalid signature or timestamp", { status: 403 });
   }
-  if (!isFreshMessage(timestamp)) {
-    return new NextResponse("stale message", { status: 403 });
+  let body;
+  try { body = JSON.parse(rawBody); } catch { return new NextResponse("invalid JSON", { status: 400 }); }
+  const type = request.headers.get("Twitch-Eventsub-Message-Type");
+  if (type === "webhook_callback_verification") {
+    return typeof body.challenge === "string" && body.challenge.length <= 2048
+      ? new NextResponse(body.challenge, { headers: { "Content-Type": "text/plain" } })
+      : new NextResponse("invalid challenge", { status: 400 });
   }
-
-  const body = JSON.parse(rawBody);
-
-  if (messageType === "webhook_callback_verification") {
-    return new NextResponse(body.challenge, { status: 200, headers: { "Content-Type": "text/plain" } });
-  }
-
-  if (messageType === "revocation") {
-    console.warn("EventSub subscription revoked", body.subscription);
+  if (type === "revocation") {
+    console.warn("EventSub subscription revoked");
     return new NextResponse(null, { status: 204 });
   }
-
-  if (messageType === "notification" && body.subscription?.type === "channel.chat.message") {
-    if (isDuplicateMessage(messageId)) {
-      return new NextResponse(null, { status: 204 });
-    }
-
-    const event = body.event as ChatMessageEvent;
-    const rawText = event.message?.text?.trim() ?? "";
-    const text = rawText.toLowerCase();
-
-    const streamer = await getStreamerByTwitchId(event.broadcaster_user_id);
-    if (!streamer) {
-      console.warn("Chat message for unregistered channel", event.broadcaster_user_id);
-      return new NextResponse(null, { status: 204 });
-    }
-
-    await broadcastToStreamer(streamer.id, "chat", chatPayload(event));
-
-    const settings = await getEntrySettings(streamer.id);
-
-    try {
-      const entered = await tryAddEntry(
-        streamer.id,
-        event.chatter_user_id,
-        event.chatter_user_login,
-        event.chatter_user_name,
-        rawText,
-        event.badges,
-        settings,
-      );
-      if (entered) await broadcastToStreamer(streamer.id, "entries");
-    } catch (err) {
-      console.error("Entry handling failed", err);
-    }
-
-    if (settings.drawMode === "number" && settings.entriesOpen) {
-      try {
-        const guess = parseGuess(rawText, settings.numberMin, settings.numberMax);
-        const isSubscriber = (event.badges ?? []).some(
-          (b) => b.set_id === "subscriber" || b.set_id === "founder",
-        );
-
-        if (guess !== null && (!settings.subscribersOnly || isSubscriber)) {
-          const session = await claimSecretNumber(streamer.id, guess);
-          if (session !== null) {
-            const { osuUsername } = await recordNumberWinner(
-              streamer.id,
-              session,
-              {
-                twitchId: event.chatter_user_id,
-                twitchLogin: event.chatter_user_login,
-                twitchDisplayName: event.chatter_user_name,
-              },
-              settings.hideOsuStats,
-            );
-
-            if (settings.chatAnnouncement) {
-              await sendTwitchChatMessage(
-                event.broadcaster_user_id,
-                `🎉 ${event.chatter_user_name} guessed ${guess} and wins!${osuUsername ? ` (osu! ${osuUsername})` : ""}`,
-              );
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Number guess handling failed", err);
-      }
-    }
-
-    try {
-      const captured = await captureWinnerMessage(streamer.id, settings, event.chatter_user_id, rawText);
-      if (captured) await broadcastToStreamer(streamer.id, "winner-chat");
-    } catch (err) {
-      console.error("Winner chat capture failed", err);
-    }
-
-    if (text.startsWith("!pickwinner") && isAuthorized(event, streamer.twitchId)) {
-      try {
-        if (settings.drawMode === "number") {
-          await sendTwitchChatMessage(
-            event.broadcaster_user_id,
-            "This channel is running a number guess — the winner is whoever guesses the number first.",
-          );
-          return new NextResponse(null, { status: 204 });
-        }
-
-        const criteria = await loadCriteria(streamer.id);
-        const { winner } = await pickWinner(
-          streamer.id,
-          criteria,
-          "chat",
-          settings.ignoreOsuCriteria,
-        );
-        const reply = winner
-          ? `🎉 Winner: ${winner.twitchDisplayName}${winner.osuUsername ? ` (osu! ${winner.osuUsername})` : ""}`
-          : "No participants currently match the criteria.";
-        await sendTwitchChatMessage(event.broadcaster_user_id, reply);
-      } catch (err) {
-        console.error("!pickwinner handling failed", err);
-      }
-    }
-
+  if (type !== "notification" || body.subscription?.type !== "channel.chat.message") {
     return new NextResponse(null, { status: 204 });
   }
-
+  const parsed = chat.safeParse(body.event);
+  if (!parsed.success) return new NextResponse("invalid event", { status: 400 });
+  if (durableEventsEnabled()) {
+    try { await enqueueEvent(messageId, parsed.data); }
+    catch { return new NextResponse("queue unavailable", { status: 503 }); }
+  } else if (!isDuplicateMessage(messageId)) {
+    const streamer = await getStreamerByTwitchId(parsed.data.broadcaster_user_id);
+    if (streamer) await processChatEvent(messageId, parsed.data, {
+      streamer, settings: await getEntrySettings(streamer.id),
+    }, false);
+  }
   return new NextResponse(null, { status: 204 });
 }

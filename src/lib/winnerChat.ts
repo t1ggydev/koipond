@@ -21,18 +21,25 @@ export async function captureWinnerMessage(
   settings: EntrySettings,
   twitchId: string,
   message: string,
+  sourceEventId?: string,
+  receivedAt?: string,
 ): Promise<boolean> {
   const capture = settings.chatCapture;
   if (!capture) return false;
   if (capture.twitchId !== twitchId) return false;
-  if (Date.parse(capture.until) <= Date.now()) return false;
+  const observedAt = receivedAt ? Date.parse(receivedAt) : Date.now();
+  if (!Number.isFinite(observedAt)) throw new Error("invalid_event_receipt_time");
+  if (Date.parse(capture.until) <= observedAt) return false;
 
   const { error } = await supabaseAdmin().from("winner_messages").insert({
     streamer_id: streamerId,
     draw_id: capture.drawId,
     twitch_id: twitchId,
     message,
+    ...(sourceEventId ? { source_event_id: sourceEventId } : {}),
+    ...(receivedAt ? { sent_at: receivedAt } : {}),
   });
+  if (error && sourceEventId && error.code === "23505") return false;
   if (error) throw error;
   return true;
 }

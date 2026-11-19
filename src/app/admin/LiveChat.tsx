@@ -40,7 +40,8 @@ export function LiveChat({ streamerId }: { streamerId: string }) {
       .on("broadcast", { event: "ping" }, ({ payload }) => {
         const message = payload as ChatMessage;
         if (!message?.id) return;
-        setMessages((prev) => [...prev, message].slice(-MAX_MESSAGES));
+        setMessages((prev) => prev.some((existing) => existing.id === message.id)
+          ? prev : [...prev, message].slice(-MAX_MESSAGES));
       })
       .subscribe((status) => setConnected(status === "SUBSCRIBED"));
 

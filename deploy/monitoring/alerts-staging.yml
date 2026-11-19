@@ -1,0 +1,34 @@
+# DRAFT ONLY. Install after the private staging scrape target is operational.
+# Global queue values are duplicated by each web instance; aggregate with max.
+groups:
+  - name: koipond-staging
+    rules:
+      - alert: KoipondStagingDown
+        expr: up{job="koipond-staging"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          environment: staging
+          application: koipond
+        annotations:
+          summary: Koipond-Staging ist nicht erreichbar
+          description: 'Der private Metrik-Endpunkt {{ $labels.instance }} konnte seit zwei Minuten nicht erfolgreich abgefragt werden.'
+      - alert: KoipondStagingQueueDelayed
+        expr: max by (job) (koipond_queue_oldest_age_seconds{job="koipond-staging"}) > 10
+        for: 2m
+        labels:
+          severity: warning
+          environment: staging
+          application: koipond
+        annotations:
+          summary: Koipond-Staging verarbeitet Ereignisse verzögert
+          description: 'Das älteste wartende oder verarbeitete Ereignis ist seit zwei Minuten älter als zehn Sekunden (aktuell {{ $value }} Sekunden).'
+      - alert: KoipondStagingDeadEvents
+        expr: max by (job) (koipond_queue_dead{job="koipond-staging"}) > 0
+        labels:
+          severity: critical
+          environment: staging
+          application: koipond
+        annotations:
+          summary: Koipond-Staging hat endgültig fehlgeschlagene Ereignisse
+          description: 'Mindestens ein Ereignis hat seine Wiederholungen ausgeschöpft. Globale Anzahl: {{ $value }}. Geschützte Fehlerdiagnose prüfen; keine Chat-Inhalte in Alarmnachrichten übernehmen.'

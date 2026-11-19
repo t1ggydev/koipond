@@ -40,7 +40,9 @@ async function startApp(configured) {
   await once(reservation, "listening");
   const port = reservation.address().port;
   await new Promise((done) => reservation.close(done));
-  const child = spawn(process.execPath, [resolve(directory, "server.js")], {
+  const preload = existsSync(resolve(directory, "observability.cjs"))
+    ? resolve(directory, "observability.cjs") : resolve("scripts/http-metrics.cjs");
+  const child = spawn(process.execPath, ["--require", preload, resolve(directory, "server.js")], {
     cwd: directory,
     env: {
       ...process.env,
@@ -48,10 +50,12 @@ async function startApp(configured) {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       ENABLE_DEMO: "false",
+      KOIPOND_DURABLE_EVENTS: "false",
       SUPABASE_INTERNAL_URL: `http://127.0.0.1:${upstreamPort}`,
       SUPABASE_SERVICE_ROLE_KEY: key,
       KOIPOND_MONITORING_TOKEN: configured ? token : "",
       CRON_SECRET: "",
+      KOIPOND_WORKER_TOKEN: "",
     },
     stdio: ["ignore", "ignore", "ignore"],
   });

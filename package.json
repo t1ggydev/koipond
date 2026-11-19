@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node --require ./scripts/http-metrics.cjs node_modules/next/dist/bin/next start",
     "lint": "eslint",
-    "test:runtime": "node scripts/check-runtime.mjs"
+    "test:runtime": "node scripts/check-runtime.mjs",
+    "test:monitoring": "node scripts/check-monitoring.mjs",
+    "worker": "node scripts/worker.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
