@@ -7,8 +7,8 @@ requires successful acceptance tests and Leon's explicit approval.
 ## Tasks
 
 - [ ] Prepare reproducible container packaging and liveness checks (local draft).
-- [ ] Complete read-only Vercel and Supabase inventory after scoped access is supplied.
-- [ ] Add private readiness and aggregate monitoring instrumentation.
+- [ ] Review read-only cloud inventory and schema replay evidence (local checks passed, PR pending).
+- [ ] Review protected readiness/process metrics and finish HTTP/business instrumentation.
 - [ ] Replace process-local EventSub deduplication with durable ingestion and a worker.
 - [ ] Coordinate sessions, Server Actions, cache handling and two-instance deployments.
 - [ ] Add distributed scheduling and protected statistics refresh execution.

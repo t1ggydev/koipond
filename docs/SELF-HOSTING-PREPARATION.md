@@ -1,14 +1,25 @@
 # Koipond: isolated migration preparation
 
-Status 2026-11-19: local draft only. No push, cloud deployment, infrastructure
-change, production SQL, DNS change or EventSub subscription mutation.
+Status 2026-11-19: local draft only. No push, cloud deployment, production
+service configuration, production SQL writes, DNS change or EventSub mutation.
 
 ## Verified baseline
 
 - GitHub main: d723d8d74ad6e3c51eed1797153f872581e2b34b; Leon confirms production.
 - GitHub CLI is authenticated and can access the repository; no additional token required.
-- Vercel: https://vercel.com/t1ggys-projects/koiproject (credentials still required).
-- Supabase: xlatvbaiwfftkxgtzrly (scoped read-only management access still required).
+- Vercel: https://vercel.com/t1ggys-projects/koiproject; authenticated reads confirmed.
+- Supabase: xlatvbaiwfftkxgtzrly; management token and read-only SQL confirmed.
+- Vercel production commit matches main, Node 24.x, function region fra1.
+- Canonical domain www.koipond.live; bare domain redirects with HTTP 308.
+- Existing stage.koipond.live custom environment was discovered and left unchanged.
+- Preview and production share several credential entries, including the service
+  role key. Do not assume Vercel preview is an isolated database test environment.
+- Hosted Supabase is healthy in eu-central-1 on PostgreSQL 17.6.1.155.
+- Production schema has eight RLS-enabled app tables, 85 columns, 23 indexes,
+  22 constraints, and the draws-only supabase_realtime publication.
+- Empty Storage and Supabase Auth user counts confirmed by aggregate read-only SQL.
+- Backup API listed zero backups; PITR is false. This does not rule out backups
+  outside the platform. A verified data backup is required before data migration.
 - pve01: approximately 64 GB RAM, 39 GB available at inventory time; ZFS healthy.
 - edge01: 2 GB RAM, approximately 1.5 GB available; 20 GB free root filesystem.
 - apps01: 8 GB RAM, approximately 7.3 GB available; 73 GB free root filesystem.
@@ -37,19 +48,31 @@ change, production SQL, DNS change or EventSub subscription mutation.
   network=none, no published ports, a memory/CPU limit and non-root user node.
 - Test container and owned temporary source directory were removed. Only the
   preparation image/build cache remain on apps01. No persistent app service runs.
+- A second image, koipond-prep:fe974bc44407, passed twelve runtime integration
+  checks on Linux, including protected metrics/readiness, failure/timeout/redirect
+  handling and fail-closed behavior. Its dependency was a local mock, not Supabase.
+- All 16 repository SQL migrations replayed in disposable PostgreSQL 17 with
+  no network or host ports. All 85 columns, 23 indexes and 22 constraints match
+  the hosted metadata; RLS visibility/write denial and publication checks passed.
+- Cloud has 17 migration records: the extra enable_rls_settings migration repeats
+  the settings RLS activation already present in repository migration 0001.
+- Replay used synthetic data only; the temporary database and source were removed.
 - Compose draft syntax validated with --no-env-resolution and the example file;
   a real staging environment file has deliberately not been created.
 - Compose staging configuration binds only to loopback, has no scheduler, and
   expects an independent staging database and test-only OAuth/webhook credentials.
 - Production secrets must never be build arguments. NEXT_PUBLIC_* values are
   deliberately public build inputs; changing Supabase endpoints requires rebuilding.
-- Base image digest and production Node version must be confirmed before deployment.
+- Production Node major version is confirmed as 24. Base image digest must still
+  be pinned before a deployment is approved.
 
 ## Multi-instance and monitoring work still pending
 
-No live metrics, worker, queue or migration has been implemented yet.
+Protected process metrics and database readiness are implemented and tested only
+in the preparation branch. They are not deployed to production or Grafana.
+HTTP/business/user metrics, durable worker/queue and scheduling are still pending.
 
-1. Add bounded private readiness and aggregate metrics; no sensitive responses.
+1. Integrate the prepared private readiness and process metrics into staging.
 2. Add durable atomic EventSub ingress deduplication and leased worker processing.
 3. Validate per-channel ordering and transactional giveaway mutations under concurrency.
 4. Coordinate SESSION_SECRET, Server Action encryption keys, cache and release draining.
@@ -59,15 +82,15 @@ No live metrics, worker, queue or migration has been implemented yet.
 7. Keep metrics collection on existing monitoring infrastructure over private access.
 8. Build isolated acceptance tests before pushing or deploying anything.
 
-## Cloud inventory needed
+## Cloud inventory result
 
-Vercel: project settings, deployed commit, Node/build settings, region, domains,
-cron configuration and environment variable NAMES/scopes; no initial secret export.
+Vercel: read project settings, deployed commit, Node/build settings, region,
+domains, cron configuration and environment variable NAMES/scopes. No secret export.
 
-Supabase: region/version, health, database size and schema, migration history,
-RLS/grants/publications, storage usage/configuration and available backups/logs.
-Use a token scoped to this project with read-only permissions. Production service
-role keys and database passwords are not needed for this initial inventory.
+Supabase: read region/version, four services' health, database size/schema,
+migration history, RLS/grants/publications, indexes/constraints, aggregate row and
+storage/auth counts, and backup status. No user rows or chat bodies were fetched.
+Production service role keys and database passwords were not used for this audit.
 
 ## Explicit production gate
 
