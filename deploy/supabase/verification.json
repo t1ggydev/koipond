@@ -1,0 +1,79 @@
+{
+  "services": [
+    {
+      "service": "api-gw",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "auth",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "db",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "functions",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "imgproxy",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "meta",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "rest",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "storage",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "studio",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "supavisor",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "realtime",
+      "state": "running",
+      "health": "healthy"
+    }
+  ],
+  "api_checks": {
+    "auth": 200,
+    "rest": 200,
+    "storage": 200,
+    "private_route_blocked_/": 404,
+    "private_route_blocked_/pg/": 404,
+    "private_route_blocked_/mcp": 404,
+    "private_route_blocked_/api/mcp": 404,
+    "service_role_operational_rpc": 200,
+    "anonymous_operational_rpc_denied": 401
+  },
+  "database": {
+    "version": "17.6",
+    "app_tables": 8,
+    "applied_migrations": 17
+  },
+  "public_api_url": "https://koipond-api.kluge-it.tech",
+  "studio_binding": "127.0.0.1:3001",
+  "api_binding": "10.10.10.30:8000",
+  "logflare_vector_enabled": false
+}

@@ -78,6 +78,9 @@
                 cap_drop: [ALL]
                 security_opt: [no-new-privileges:true]
                 stop_grace_period: 60s
+                logging:
+                  driver: json-file
+                  options: {max-size: 10m, max-file: "3"}
               x-worker: &worker
                 image: "{{ koipond_image_id }}"
                 command: [node, /app/worker.mjs]
@@ -91,6 +94,9 @@
                 healthcheck:
                   disable: true
                 stop_grace_period: 60s
+                logging:
+                  driver: json-file
+                  options: {max-size: 10m, max-file: "3"}
                 depends_on:
                   web1:
                     condition: service_healthy
@@ -126,6 +132,37 @@
             dest: "{{ koipond_stage_root }}/active-release.json"
             mode: '0600'
             content: "{{ {'image_id': koipond_image_id, 'image_ref': koipond_image_ref, 'environment': 'staging', 'public_cutover': false} | to_nice_json }}\n"
+        - name: Install local statistics refresh unit without exposing cron credential
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/koipond-stats-refresh.service
+            mode: '0644'
+            content: |
+              [Unit]
+              Description=Refresh private Koipond statistics
+              After=docker.service network-online.target
+              [Service]
+              Type=oneshot
+              TimeoutStartSec=300
+              ExecStart=/usr/bin/docker compose -p koipond-staging -f /srv/koipond-staging/compose.yml exec -T web1 node -e "fetch('http://127.0.0.1:3000/api/cron/refresh-osu-stats',{headers:{authorization:'Bearer '+process.env.CRON_SECRET},signal:AbortSignal.timeout(270000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        - name: Install statistics refresh schedule
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/koipond-stats-refresh.timer
+            mode: '0644'
+            content: |
+              [Unit]
+              Description=Refresh private Koipond statistics every thirty minutes
+              [Timer]
+              OnCalendar=*-*-* *:00,30:00
+              RandomizedDelaySec=30
+              Persistent=true
+              [Install]
+              WantedBy=timers.target
+        - name: Enable statistics refresh on application server
+          ansible.builtin.systemd_service:
+            name: koipond-stats-refresh.timer
+            enabled: true
+            state: started
+            daemon_reload: true
       rescue:
         - name: Restore previous stage configuration only
           ansible.builtin.shell: >-

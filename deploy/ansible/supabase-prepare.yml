@@ -1,0 +1,128 @@
+- name: Prepare private self-hosted Koipond Supabase
+  hosts: supabase01
+  gather_facts: false
+  vars:
+    supabase_root: /srv/koipond-supabase
+  tasks:
+    - name: Create private deployment root
+      ansible.builtin.file:
+        path: "{{ supabase_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Create reviewed configuration directories only
+      ansible.builtin.file:
+        path: "{{ supabase_root }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: "{{ supabase_source_directories }}"
+    - name: Copy pinned upstream assets and private configuration
+      ansible.builtin.copy:
+        src: "{{ supabase_source }}/{{ item }}"
+        dest: "{{ supabase_root }}/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ supabase_source_files }}"
+    - name: Install protected independent Supabase environment
+      ansible.builtin.copy:
+        src: /home/leon/homelab-ansible/root-infra/work/koipond-supabase-runtime/runtime.env
+        dest: "{{ supabase_root }}/.env"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Create private writable storage and snippet directories
+      ansible.builtin.file:
+        path: "{{ supabase_root }}/data/{{ item }}"
+        state: directory
+        owner: '1000'
+        group: '1000'
+        mode: '0700'
+      loop: [storage, snippets]
+    - name: Create migration directory
+      ansible.builtin.file:
+        path: "{{ supabase_root }}/app-migrations"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Copy application migrations without any Cloud data
+      ansible.builtin.copy:
+        src: "{{ supabase_migration_source }}/{{ item }}"
+        dest: "{{ supabase_root }}/app-migrations/{{ item }}"
+        owner: root
+        group: root
+        mode: '0600'
+      loop: "{{ supabase_migration_files }}"
+    - name: Detect existing immutable image lock
+      ansible.builtin.stat:
+        path: "{{ supabase_root }}/images.lock.yml"
+      register: image_lock
+    - name: Pull reviewed release images on first installation
+      ansible.builtin.command:
+        argv: [docker, compose, --env-file, .env, -f, compose.yml, pull, --quiet]
+        chdir: "{{ supabase_root }}"
+      when: not image_lock.stat.exists
+      async: 1200
+      poll: 5
+      no_log: true
+    - name: Record immutable image references
+      ansible.builtin.command: python3 /srv/koipond-supabase/lock-images.py
+      changed_when: not image_lock.stat.exists
+    - name: Start the private stack and wait for health
+      block:
+        - name: Start pinned services
+          ansible.builtin.command:
+            argv: [docker, compose, --env-file, .env, -f, compose.yml, -f, images.lock.yml, up, -d, --wait, --wait-timeout, '300']
+            chdir: "{{ supabase_root }}"
+          async: 900
+          poll: 5
+          no_log: true
+      rescue:
+        - name: Collect redacted diagnostics
+          ansible.builtin.command: python3 /srv/koipond-supabase/diagnose.py
+          register: diagnostics
+          changed_when: false
+        - ansible.builtin.debug:
+            var: diagnostics.stdout
+        - ansible.builtin.fail:
+            msg: Private Supabase stack did not become healthy; redacted diagnostics above.
+    - name: Apply only this server's application migrations
+      ansible.builtin.command: python3 /srv/koipond-supabase/migrate.py
+      register: migrations
+      changed_when: "'migrations: 0' not in migrations.stdout"
+    - name: Verify private API and database protections
+      ansible.builtin.command: python3 /srv/koipond-supabase/verify.py
+      register: verification
+      changed_when: false
+    - name: Report non-sensitive private stack evidence
+      ansible.builtin.debug:
+        var: verification.stdout
+    - name: Install persistent private Supabase service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/koipond-supabase.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Private self-hosted Koipond Supabase
+          Requires=docker.service
+          After=docker.service network-online.target
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          WorkingDirectory=/srv/koipond-supabase
+          ExecStart=/usr/bin/docker compose --env-file .env -f compose.yml -f images.lock.yml up -d --wait --wait-timeout 300
+          ExecStop=/usr/bin/docker compose --env-file .env -f compose.yml -f images.lock.yml stop
+          TimeoutStartSec=360
+          [Install]
+          WantedBy=multi-user.target
+    - name: Enable private stack boot recovery
+      ansible.builtin.systemd_service:
+        name: koipond-supabase
+        enabled: true
+        daemon_reload: true
+        state: started

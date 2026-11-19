@@ -25,7 +25,7 @@ pipeline {
           root=/home/jenkins-ci/koipond-preparation
           mkdir -p "$root"
           if ! test -d "$root/repo/.git"; then
-            git clone --no-checkout https://github.com/t1ggydev/koipond.git "$root/repo"
+            git clone --branch prep/koipond-self-hosting https://github.com/t1ggydev/koipond.git "$root/repo"
           fi
           cd "$root/repo"
           test -z "$(git status --porcelain)"
