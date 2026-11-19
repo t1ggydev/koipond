@@ -44,8 +44,8 @@ pipeline {
             -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
             -e "koipond_revision=$revision" -e "koipond_source_archive=$archive" \
             -e "koipond_image_ref=$image_ref"
-          printf '%s\n' "$revision" > "$root/state/revision"
-          printf '%s\n' "$image_ref" > "$root/state/image-ref"
+          echo "$revision" > "$root/state/revision"
+          echo "$image_ref" > "$root/state/image-ref"
           KOIPOND
         '''.stripIndent(10)
       }
