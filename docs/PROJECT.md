@@ -25,6 +25,8 @@ explicitly approves the final production cutover. No merge into main yet.
 - [x] Exercise all three private VM restarts and take fresh encrypted PBS snapshots.
 - [x] Build inactive canonical production image and record its immutable identity.
 - [x] Review gated production activation; rehearse reversible write fencing and final-sync rollback in isolation.
+- [x] Replace main's Vercel requirement with native Jenkins PR-head checks using a restricted folder credential.
+- [x] Move builds to a separate agent, upgrade Jenkins/agent Java to 25 and enforce UI CSP.
 - [ ] Obtain Leon's explicit Go-live approval before production DNS/live-write switch.
 
 ## References

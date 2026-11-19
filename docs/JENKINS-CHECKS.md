@@ -32,6 +32,21 @@ platform continues coordinating builds and isolated acceptance tests on apps01.
 Container builds include lint, type/build validation, queue/RLS/concurrency and
 two-instance tests. Test containers and temporary source are removed afterward.
 
+The Jenkins controller and agent run Java 25. The built-in controller has zero
+build executors. The agent's inbound WebSocket uses a pinned SSH tunnel from the
+Ansible host to Jenkins; its HTTP endpoint is bound to loopback on the agent.
+The dedicated tunnel account permits only forwarding to Jenkins' local port and
+has no shell access. The agent secret is a private file, not a process argument.
+Both the harmless agent smoke job and the full PR build have succeeded.
+
+Jenkins UI CSP is enforced through its managed service configuration. Installed
+plugins were compared with the official compatibility inventory. The remaining
+known email-ext limitation concerns template preview/testing, not ordinary job
+execution; this compatibility exception is recorded in infrastructure evidence.
+No Jenkins users, authorization strategy or plugins were changed. The controller
+was restarted in an idle window with encrypted configuration recovery material;
+agent reconnection was verified afterward.
+
 The existing manual Koipond preparation job remains available for explicit private
 staging deployment. The existing homelab job retains its provisioning logic and
 defaults; only its execution location and matching SSH key path are migrated.
