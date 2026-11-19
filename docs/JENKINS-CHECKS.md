@@ -25,7 +25,9 @@ and verifies that same SHA on the existing Ansible controller. It never substitu
 the current preparation-branch tip for a pull-request revision. A controller-side
 file lock serializes the shared build workspace; state and immutable image tags
 are separated by Jenkins run identity. PR builds always skip private deployment,
-even if someone selects its parameter. Production deployment is absent.
+even if someone selects its parameter. Production deployment is absent. The
+read-only SCM checkout retries up to three times, with a delay after failures,
+to tolerate short network interruptions without blindly repeating deployments.
 
 All build steps run on the dedicated `koipond-build` agent. The existing Ansible
 platform continues coordinating builds and isolated acceptance tests on apps01.
@@ -43,9 +45,19 @@ Jenkins UI CSP is enforced through its managed service configuration. Installed
 plugins were compared with the official compatibility inventory. The remaining
 known email-ext limitation concerns template preview/testing, not ordinary job
 execution; this compatibility exception is recorded in infrastructure evidence.
-No Jenkins users, authorization strategy or plugins were changed. The controller
+No Jenkins users or authorization strategy were changed. Native application
+monitoring adds only the verified official Prometheus plugin and its required
+metrics dependency; the original plugins were not upgraded. The controller
 was restarted in an idle window with encrypted configuration recovery material;
-agent reconnection was verified afterward.
+agent reconnection was verified afterward. Both JVMs use private temporary
+directories on their root disks instead of the small /tmp tmpfs. Jenkins also
+has a reserve-checked persistent 2GiB swap file with swappiness10. No VM RAM or
+disk expansion was needed according to the measured host and guest reserves.
+
+The private native metrics endpoint feeds the existing Prometheus/Grafana stack.
+Its application dashboard covers the queue, agent, executors, builds, JVM/GC and
+SCM indexing; alerts include failed builds and failed/stuck indexing. Build
+parameters and per-build labels are disabled, and disk-usage scanning is disabled.
 
 The existing manual Koipond preparation job remains available for explicit private
 staging deployment. The existing homelab job retains its provisioning logic and

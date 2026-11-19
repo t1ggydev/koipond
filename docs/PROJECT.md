@@ -27,6 +27,9 @@ explicitly approves the final production cutover. No merge into main yet.
 - [x] Review gated production activation; rehearse reversible write fencing and final-sync rollback in isolation.
 - [x] Replace main's Vercel requirement with native Jenkins PR-head checks using a restricted folder credential.
 - [x] Move builds to a separate agent, upgrade Jenkins/agent Java to 25 and enforce UI CSP.
+- [x] Verify all nine VMs and resource reserves; persist private Jenkins temp paths and reserve-checked swap.
+- [x] Group Grafana by site with VM details,35 Docker components and native application/database monitoring.
+- [x] Validate correlated alarms with synthetic failure/negative fixtures and the existing receiver configuration.
 - [ ] Obtain Leon's explicit Go-live approval before production DNS/live-write switch.
 
 ## References

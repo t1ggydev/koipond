@@ -14,7 +14,12 @@ pipeline {
     stage('Pin the exact SCM revision') {
       steps {
         script {
-          def source = checkout scm
+          def source
+          def attempts = 0
+          retry(3) {
+            if (attempts++ > 0) sleep time: 15, unit: 'SECONDS'
+            source = checkout scm
+          }
           if (!(source.GIT_COMMIT ==~ /^[a-f0-9]{40}$/)) {
             error('SCM did not supply an exact commit identity')
           }

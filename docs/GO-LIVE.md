@@ -65,6 +65,13 @@ it cannot create real subscriptions or send Twitch chat messages.
    migration; stop instead of silently omitting them.
 4. Quiesce all staging web/worker containers and its statistics timer using
    apps-production-deploy.yml --tags quiesce. Keep production candidate inactive.
+   Before this planned stop, disable the staging service expectations explicitly
+   in apps01's root-only /var/lib/infrastructure-docker-metrics/expected.json or
+   apply a bounded alert silence for only the affected staging components. The
+   Docker collector retains missing durable services intentionally. Production
+   service expectations are learned when the new long-running containers start;
+   restore staging expectations if the cutover is rolled back. Do not suppress
+   unrelated VM, database, mail or backup alarms.
 5. Apply deploy/cutover/freeze-cloud.sql through the authorized Cloud SQL channel.
    This reversible, preflight-guarded transaction removes DML permissions from
    the three API roles while preserving reads and RLS. It stops old Vercel and
