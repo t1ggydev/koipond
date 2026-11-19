@@ -60,4 +60,8 @@ if (!location.getUrl()) {
   location.save()
 }
 project.scheduleBuild2(0)
+def oneTime = new File(j.rootDir, 'init.groovy.d/40-koipond-pr-checks.groovy')
+if (oneTime.exists() && !oneTime.delete()) {
+  throw new IllegalStateException('One-time PR bootstrap cleanup failed')
+}
 println('Koipond PR head indexing configured; native Jenkins statuses follow real build results.')
