@@ -1,0 +1,149 @@
+- name: Deploy tested Koipond only to private staging
+  hosts: koipond_apps
+  gather_facts: false
+  vars:
+    koipond_stage_root: /srv/koipond-staging
+  tasks:
+    - name: Require explicit private staging deployment and immutable image
+      ansible.builtin.assert:
+        that:
+          - koipond_deploy_staging | default(false) | bool
+          - koipond_image_ref is match('^koipond-prep:[a-f0-9]{40}(-[A-Za-z0-9_.-]+)?$')
+          - koipond_stage_env_source is match('^/')
+    - name: Inspect immutable image
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ koipond_image_ref }}"]
+      register: koipond_image_inspect
+      changed_when: false
+      no_log: true
+    - name: Require immutable local image identity
+      ansible.builtin.set_fact:
+        koipond_image_id: "{{ (koipond_image_inspect.stdout | from_json)[0].Id }}"
+    - name: Create private application directory
+      ansible.builtin.file:
+        path: "{{ koipond_stage_root }}"
+        state: directory
+        mode: '0700'
+    - name: Inspect current staging configuration
+      ansible.builtin.stat:
+        path: "{{ koipond_stage_root }}/compose.yml"
+      register: koipond_previous
+    - name: Create owned rollback snapshot directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ koipond_stage_root }}"
+        prefix: rollback-
+      register: koipond_rollback
+    - name: Preserve previous stage configuration and environment
+      ansible.builtin.shell: >-
+        for name in compose.yml runtime.env worker.env; do
+        if test -f {{ koipond_stage_root }}/$name; then
+        cp -p {{ koipond_stage_root }}/$name {{ koipond_rollback.path }}/$name;
+        fi; done
+      when: koipond_previous.stat.exists
+      no_log: true
+    - block:
+        - name: Install stage-only environment from protected controller source
+          ansible.builtin.copy:
+            src: "{{ koipond_stage_env_source }}"
+            dest: "{{ koipond_stage_root }}/runtime.env"
+            mode: '0600'
+          no_log: true
+        - name: Extract only dedicated worker credentials and endpoints
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                from pathlib import Path
+                root=Path('/srv/koipond-staging')
+                lines=[line for line in (root/'runtime.env').read_text().splitlines() if line.startswith(('KOIPOND_WORKER_TOKEN=','KOIPOND_WORKER_URLS='))]
+                assert len(lines)==2,'Missing dedicated worker environment'
+                (root/'worker.env').write_text('\n'.join(lines)+'\n')
+                (root/'worker.env').chmod(0o600)
+          no_log: true
+        - name: Render private two-instance stage configuration
+          ansible.builtin.copy:
+            dest: "{{ koipond_stage_root }}/compose.yml"
+            mode: '0600'
+            content: |
+              name: koipond-staging
+              x-web: &web
+                image: "{{ koipond_image_id }}"
+                env_file: [runtime.env]
+                init: true
+                restart: unless-stopped
+                mem_limit: 1536m
+                cpus: 1.0
+                cap_drop: [ALL]
+                security_opt: [no-new-privileges:true]
+                stop_grace_period: 60s
+              x-worker: &worker
+                image: "{{ koipond_image_id }}"
+                command: [node, /app/worker.mjs]
+                env_file: [worker.env]
+                init: true
+                restart: unless-stopped
+                mem_limit: 192m
+                cpus: 0.25
+                cap_drop: [ALL]
+                security_opt: [no-new-privileges:true]
+                healthcheck:
+                  disable: true
+                stop_grace_period: 60s
+                depends_on:
+                  web1:
+                    condition: service_healthy
+                  web2:
+                    condition: service_healthy
+              services:
+                web1:
+                  <<: *web
+                  ports: ["10.10.10.20:3100:3000"]
+                web2:
+                  <<: *web
+                  ports: ["10.10.10.20:3101:3000"]
+                worker1:
+                  <<: *worker
+                worker2:
+                  <<: *worker
+        - name: Validate private stage configuration without exposing secrets
+          ansible.builtin.command:
+            argv: [docker, compose, -f, "{{ koipond_stage_root }}/compose.yml", config, --quiet]
+          changed_when: false
+          no_log: true
+        - name: Start private stage services
+          ansible.builtin.command:
+            argv: [docker, compose, -f, "{{ koipond_stage_root }}/compose.yml", up, -d, --no-build, --wait, --wait-timeout, '120']
+          no_log: true
+        - name: Verify both private app instances
+          ansible.builtin.command:
+            argv: [docker, compose, -p, koipond-staging, -f, "{{ koipond_stage_root }}/compose.yml", exec, -T, "{{ item }}", node, -e, "fetch('http://127.0.0.1:3000/health/live').then(r=>{if(!r.ok)process.exit(1)})"]
+          loop: [web1, web2]
+          changed_when: false
+        - name: Record active private release
+          ansible.builtin.copy:
+            dest: "{{ koipond_stage_root }}/active-release.json"
+            mode: '0600'
+            content: "{{ {'image_id': koipond_image_id, 'image_ref': koipond_image_ref, 'environment': 'staging', 'public_cutover': false} | to_nice_json }}\n"
+      rescue:
+        - name: Restore previous stage configuration only
+          ansible.builtin.shell: >-
+            for name in compose.yml runtime.env worker.env; do
+            cp -p {{ koipond_rollback.path }}/$name {{ koipond_stage_root }}/$name;
+            done
+          when: koipond_previous.stat.exists
+          no_log: true
+        - name: Reactivate previous private stage release
+          ansible.builtin.command:
+            argv: [docker, compose, -f, "{{ koipond_stage_root }}/compose.yml", up, -d, --no-build, --wait, --wait-timeout, '120']
+          when: koipond_previous.stat.exists
+          no_log: true
+        - name: Stop newly created staging services if no predecessor existed
+          ansible.builtin.command:
+            argv: [docker, compose, -f, "{{ koipond_stage_root }}/compose.yml", down]
+          when: not koipond_previous.stat.exists
+          failed_when: false
+          no_log: true
+        - ansible.builtin.fail:
+            msg: Private staging deployment failed; rollback attempted. Production was not changed.

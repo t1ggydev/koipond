@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Bootstrap only dedicated Koipond preparation job after idle checks",
+    "hosts": "all",
+    "gather_facts": false,
+    "tasks": [
+      {
+        "name": "Require branch deployment readiness",
+        "ansible.builtin.assert": {
+          "that": [
+            "koipond_jenkins_branch_ready | default(false) | bool"
+          ]
+        }
+      },
+      {
+        "name": "Back up Jenkins and create dedicated preparation job through existing guest agent",
+        "ansible.builtin.command": {
+          "argv": [
+            "qm",
+            "guest",
+            "exec",
+            "102",
+            "--synchronous",
+            "1",
+            "--",
+            "/usr/bin/python3",
+            "-c",
+            "import os,pathlib,subprocess,time,tarfile,xml.etree.ElementTree as ET,json,pwd\nr=pathlib.Path('/var/lib/jenkins')\nfor p in (r/'jobs').glob('*/builds/[0-9]*/build.xml'):\n if ET.parse(p).getroot().find('result') is None:raise RuntimeError('Existing Jenkins build is active')\nq=r/'queue.xml'\nif q.exists() and list(ET.parse(q).getroot().findall('.//hudson.model.Queue_-Item')):raise RuntimeError('Queue not empty')\n# Existing Java build descendants would be shells/git/durable task processes.\np=subprocess.run(['ps','-eo','comm='],capture_output=True,text=True)\nif any(x.strip() in ('git','npm','node','ansible-playbook','durable_task_monitor') for x in p.stdout.splitlines()):raise RuntimeError('Build-like process active')\nb=pathlib.Path('/root/koipond-jenkins-backup-'+time.strftime('%Y%m%dT%H%M%S'));b.mkdir(mode=0o700)\nwith tarfile.open(b/'jenkins-config.tgz','w:gz') as t:\n for name in ['config.xml','jobs','queue.xml','queue.xml.bak']:\n  if (r/name).exists():t.add(r/name,arcname=name)\nos.chmod(b/'jenkins-config.tgz',0o600)\nj=r/'jobs/Koipond-Preparation';j.mkdir(exist_ok=True)\n(j/'config.xml').write_text(\"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\"?>\\n<flow-definition plugin=\\\"workflow-job\\\">\\n<actions/><description>Private Koipond preparation only. Production cutover and main merge require separate explicit approval.</description><keepDependencies>false</keepDependencies>\\n<properties><org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty/><hudson.model.ParametersDefinitionProperty><parameterDefinitions><hudson.model.BooleanParameterDefinition><name>DEPLOY_PRIVATE_STAGING</name><defaultValue>true</defaultValue><description>Deploy private VPN-only staging after tests; never production.</description></hudson.model.BooleanParameterDefinition></parameterDefinitions></hudson.model.ParametersDefinitionProperty></properties>\\n<definition class=\\\"org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition\\\" plugin=\\\"workflow-cps\\\"><scm class=\\\"hudson.plugins.git.GitSCM\\\" plugin=\\\"git\\\"><configVersion>2</configVersion><userRemoteConfigs><hudson.plugins.git.UserRemoteConfig><url>https://github.com/t1ggydev/koipond.git</url></hudson.plugins.git.UserRemoteConfig></userRemoteConfigs><branches><hudson.plugins.git.BranchSpec><name>*/prep/koipond-self-hosting</name></hudson.plugins.git.BranchSpec></branches><doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations><submoduleCfg class=\\\"empty-list\\\"/><extensions/></scm><scriptPath>deploy/Jenkinsfile</scriptPath><lightweight>true</lightweight></definition><triggers/><disabled>false</disabled></flow-definition>\")\ni=r/'init.groovy.d';i.mkdir(exist_ok=True)\n(i/'koipond-preparation-once.groovy').write_text(\"import jenkins.model.Jenkins\\nimport hudson.model.ParametersAction\\nimport hudson.model.BooleanParameterValue\\ndef j = Jenkins.get()\\ndef job = j.getItemByFullName('Koipond-Preparation')\\nif (job == null || j.queue.items.length != 0 || j.computers.any { c -> c.executors.any { e -> e.busy } }) { throw new IllegalStateException('Preparation requires idle Jenkins') }\\ndef scheduled = job.scheduleBuild2(0, new ParametersAction(new BooleanParameterValue('DEPLOY_PRIVATE_STAGING', true)))\\nif (scheduled == null) { throw new IllegalStateException('Preparation build could not queue') }\\nnew File(j.rootDir, 'init.groovy.d/koipond-preparation-once.groovy').delete()\\n\")\nu=pwd.getpwnam('jenkins')\nfor p in [j,j/'config.xml',i,i/'koipond-preparation-once.groovy']:os.chown(p,u.pw_uid,u.pw_gid)\nsubprocess.run(['systemctl','restart','jenkins'],check=True,timeout=120)\nprint(json.dumps({'newJobPrepared':True,'gracefulRestart':True,'existingJobsUnchanged':True,'backup':str(b)}))\n"
+          ]
+        },
+        "async": 180,
+        "poll": 5,
+        "no_log": true
+      }
+    ]
+  }
+]

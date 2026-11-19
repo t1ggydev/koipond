@@ -1,0 +1,82 @@
+pipeline {
+  agent any
+  options {
+    skipDefaultCheckout(true)
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    timestamps()
+  }
+  parameters {
+    booleanParam(name: 'DEPLOY_PRIVATE_STAGING', defaultValue: false,
+      description: 'Deploy only private Koipond staging after all tests. Never changes production DNS or Vercel.')
+  }
+  stages {
+    stage('Checkout, build and acceptance tests on existing controller') {
+      steps {
+        sh '''
+          set -eu
+          case "$BUILD_NUMBER" in ''|*[!0-9]*) exit 1;; esac
+          ssh -T -i /var/lib/jenkins/.ssh/id_ed25519 \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            jenkins-ci@10.1.0.101 "bash -se -- $BUILD_NUMBER" <<'KOIPOND'
+          set -euo pipefail
+          umask 077
+          build_number="$1"
+          root=/home/jenkins-ci/koipond-preparation
+          mkdir -p "$root"
+          if ! test -d "$root/repo/.git"; then
+            git clone --no-checkout https://github.com/t1ggydev/koipond.git "$root/repo"
+          fi
+          cd "$root/repo"
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags origin refs/heads/prep/koipond-self-hosting
+          revision=$(git rev-parse FETCH_HEAD)
+          case "$revision" in *[!a-f0-9]*|'') exit 1;; esac
+          test "${#revision}" -eq 40
+          git checkout --detach "$revision"
+          mkdir -p "$root/artifacts" "$root/state"
+          archive="$root/artifacts/koipond-$revision.tar.gz"
+          git archive --format=tar.gz --output="$archive" "$revision"
+          image_ref="koipond-prep:$revision-$build_number"
+          ansible-playbook -i deploy/ansible/inventory.staging.ini \
+            deploy/ansible/apps-build-test.yml \
+            --vault-password-file /home/jenkins-ci/.vault-pass \
+            -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
+            -e "koipond_revision=$revision" -e "koipond_source_archive=$archive" \
+            -e "koipond_image_ref=$image_ref"
+          printf '%s\n' "$revision" > "$root/state/revision"
+          printf '%s\n' "$image_ref" > "$root/state/image-ref"
+          KOIPOND
+        '''.stripIndent()
+      }
+    }
+    stage('Deploy private staging only') {
+      when { expression { params.DEPLOY_PRIVATE_STAGING } }
+      steps {
+        sh '''
+          ssh -T -i /var/lib/jenkins/.ssh/id_ed25519 \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            jenkins-ci@10.1.0.101 'bash -se' <<'KOIPOND'
+          set -euo pipefail
+          umask 077
+          root=/home/jenkins-ci/koipond-preparation
+          revision=$(cat "$root/state/revision")
+          image_ref=$(cat "$root/state/image-ref")
+          cd "$root/repo"
+          test "$(git rev-parse HEAD)" = "$revision"
+          ansible-playbook -i deploy/ansible/inventory.staging.ini \
+            deploy/ansible/apps-deploy.yml \
+            --vault-password-file /home/jenkins-ci/.vault-pass \
+            -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
+            -e "koipond_image_ref=$image_ref" -e koipond_deploy_staging=true
+          KOIPOND
+        '''.stripIndent()
+      }
+    }
+  }
+  post {
+    always {
+      echo 'Koipond preparation ended. Production cutover, main merge and DNS changes are never part of this pipeline.'
+    }
+  }
+}

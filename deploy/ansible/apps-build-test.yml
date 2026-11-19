@@ -1,0 +1,105 @@
+- name: Build and test Koipond without production services
+  hosts: koipond_apps
+  gather_facts: false
+  vars:
+    koipond_build_root: /srv/koipond-staging
+  tasks:
+    - name: Enforce immutable preparation-only image and explicit build inputs
+      ansible.builtin.assert:
+        that:
+          - koipond_image_ref is match('^koipond-prep:[a-f0-9]{40}(-[A-Za-z0-9_.-]+)?$')
+          - koipond_revision is match('^[a-f0-9]{40}$')
+          - koipond_source_archive is match('^/')
+          - koipond_public_anon_key | length > 20
+          - koipond_public_app_url == 'https://koipond-stage.kluge-it.tech'
+          - koipond_public_api_url == 'https://koipond-api.kluge-it.tech'
+    - name: Create protected staging build state
+      ansible.builtin.file:
+        path: "{{ koipond_build_root }}"
+        state: directory
+        mode: '0700'
+    - name: Create owned temporary build directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /var/tmp
+        prefix: koipond-ci-build-
+      register: koipond_context
+    - block:
+        - name: Extract immutable repository snapshot
+          ansible.builtin.unarchive:
+            src: "{{ koipond_source_archive }}"
+            dest: "{{ koipond_context.path }}"
+        - name: Run queue and RLS tests against disposable PostgreSQL only
+          ansible.builtin.command:
+            argv: [python3, "{{ koipond_context.path }}/scripts/check-queue.py"]
+          async: 600
+          poll: 5
+        - name: Run disposable two-instance integration acceptance stack
+          ansible.builtin.command:
+            argv: [python3, "{{ koipond_context.path }}/scripts/check-stack.py", --image, "{{ koipond_image_ref }}-acceptance"]
+          async: 1200
+          poll: 5
+        - name: Refuse to overwrite an existing immutable release tag
+          ansible.builtin.command:
+            argv: [docker, image, inspect, "{{ koipond_image_ref }}"]
+          register: koipond_existing_image
+          changed_when: false
+          failed_when: koipond_existing_image.rc not in [0, 1]
+          no_log: true
+        - name: Prepare stable server action encryption key as BuildKit secret
+          ansible.builtin.copy:
+            dest: "{{ koipond_context.path }}.server-actions-key"
+            content: "{{ koipond_server_actions_key }}"
+            mode: '0600'
+          no_log: true
+        - name: Build deployable staging image with public inputs only
+          ansible.builtin.command:
+            argv:
+              - docker
+              - build
+              - --secret
+              - "id=server_actions_key,src={{ koipond_context.path }}.server-actions-key"
+              - --tag
+              - "{{ koipond_image_ref }}"
+              - --label
+              - "org.opencontainers.image.revision={{ koipond_revision }}"
+              - --label
+              - koipond.environment=staging
+              - --build-arg
+              - "KOIPOND_REVISION={{ koipond_revision }}"
+              - --build-arg
+              - "NEXT_PUBLIC_APP_URL={{ koipond_public_app_url }}"
+              - --build-arg
+              - "NEXT_PUBLIC_SUPABASE_URL={{ koipond_public_api_url }}"
+              - --build-arg
+              - "NEXT_PUBLIC_SUPABASE_ANON_KEY={{ koipond_public_anon_key }}"
+              - "{{ koipond_context.path }}"
+          when: koipond_existing_image.rc != 0
+          async: 900
+          poll: 5
+          no_log: true
+        - name: Read release identity
+          ansible.builtin.command:
+            argv: [docker, image, inspect, "{{ koipond_image_ref }}"]
+          register: koipond_image_inspect
+          changed_when: false
+          no_log: true
+        - name: Verify image revision label
+          ansible.builtin.assert:
+            that:
+              - (koipond_image_inspect.stdout | from_json)[0].Config.Labels['org.opencontainers.image.revision'] == koipond_revision
+        - name: Record non-sensitive immutable release identity
+          ansible.builtin.copy:
+            dest: "{{ koipond_build_root }}/last-tested-release.json"
+            mode: '0600'
+            content: "{{ {'revision': koipond_revision, 'image_ref': koipond_image_ref, 'image_id': (koipond_image_inspect.stdout | from_json)[0].Id, 'environment': 'staging', 'tests': 'queue-and-two-instance-pass'} | to_nice_json }}\n"
+      always:
+        - name: Remove transient server action BuildKit secret
+          ansible.builtin.file:
+            path: "{{ koipond_context.path }}.server-actions-key"
+            state: absent
+          no_log: true
+        - name: Remove only owned temporary build source
+          ansible.builtin.file:
+            path: "{{ koipond_context.path }}"
+            state: absent
