@@ -2,7 +2,8 @@
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 const require = createRequire("/app/package.json");
-const { createClient } = require("@supabase/supabase-js");
+// Next bundles its server dependencies; the probe may mount the matching public SDK bundle.
+const { createClient } = require(process.env.KOIPOND_PROBE_CLIENT || "@supabase/supabase-js");
 const env = process.env;
 if (env.KOIPOND_PREPARATION_SMOKE !== "true" ||
     env.NEXT_PUBLIC_APP_URL !== "https://koipond-stage.kluge-it.tech" ||
@@ -63,13 +64,17 @@ try {
   assert(broadcast.ok, "realtime_rest_broadcast_accepted");
   assert(await received.promise, "realtime_websocket_broadcast_received");
   const changesJoined = deferred("postgres_subscription_timeout");
+  const changesReady = deferred("postgres_replication_ready_timeout");
   const changeReceived = deferred("postgres_change_timeout");
-  changesChannel = browser.channel(`${marker}:changes`).on("postgres_changes", {
+  changesChannel = browser.channel(`${marker}:changes`).on("system", {}, (event) => {
+    if (event.extension === "postgres_changes" && event.status === "ok") changesReady.resolve(true);
+  }).on("postgres_changes", {
     event: "INSERT", schema: "public", table: "draws", filter: `id=eq.${probeId}`,
   }, (event) => { if (event.new.id === probeId) changeReceived.resolve(true); }).subscribe((status) => {
     if (status === "SUBSCRIBED") changesJoined.resolve(true);
   });
   await changesJoined.promise;
+  await changesReady.promise;
   // This unscoped synthetic draw cannot appear in a streamer's filtered overlay.
   const inserted = await admin.from("draws").insert({ id: probeId, triggered_by: "dashboard",
     source_event_id: marker, criteria: { preparation_probe: true } });

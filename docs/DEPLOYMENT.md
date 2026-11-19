@@ -72,3 +72,35 @@ lease fencing, backup restoration, monitoring, final production allowlist and
 canonical OAuth flow. Prepare the production runtime separately, retaining the
 existing production session secret. Obtain explicit final approval before
 changing www.koipond.live, provider callbacks, or moving live writes.
+
+## Reviewable final activation (prepared, not executed)
+
+`apps-production-deploy.yml` has separate tags. With explicit final approval,
+run `--tags quiesce` and `koipond_quiesce_for_final_sync=true` BEFORE the final
+data sync: this stops both stage web instances, both stage workers and the stage
+statistics scheduler. After the final backup/sync and validation, `--tags deploy`
+additionally requires `koipond_final_sync_complete=true`, verifies that the stage
+containers remain stopped, and activates the immutable production candidate in
+the separate `koipond-production` project under `/srv/koipond-production`, using
+ports 3200/3201. Supply `koipond_production_environment` from the protected
+production runtime Vault's `environment` object. Production statistics have a
+separate timer. Never resume stage consumers against the production queue.
+
+`edge-production.yml --tags prepare` writes an inactive nginx configuration and
+checks its syntax using the existing STAGE certificate solely as a test fixture.
+This check does NOT establish production certificate readiness. The active
+private proxy remains unchanged. `--tags activate` requires explicit final
+approval, application readiness and real certificate readiness. It verifies
+certificate lifetime, a trusted chain, both `www.koipond.live` and `koipond.live`
+hostnames, and matching nginx certificate/key before activating the configuration.
+Provision real production certificates under `/srv/koipond-edge/production-tls`
+first. The existing DNS token covers only kluge-it.tech, so it cannot perform
+DNS01 for koipond.live. Acquire that zone access or arrange HTTP01 during the
+separately approved final DNS/network change, including ongoing renewal.
+
+The inactive configuration redirects the bare domain to www, exposes only the
+documented Supabase API routes, retains private stage-host monitoring endpoints
+but points their metrics/readiness at production ports, and blocks worker/cron
+routes. Its container listens on 8443 (HTTPS) and 8080 (HTTP), with host mappings
+443 and 80. Root DNAT/firewall activation and final DNS remain separate gated
+operations. No playbook in this section has been activated for production.
