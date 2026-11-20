@@ -10,9 +10,10 @@ is authorized until Leon explicitly approves Go-live.
 | --- | --- |
 | Private application | https://koipond-stage.kluge-it.tech |
 | Private API | https://koipond-api.kluge-it.tech |
+| Private Studio | https://koipond-api.kluge-it.tech/ (VPN/LAN only, HTTP Basic authentication) |
 | Edge | 10.10.10.10; public address 212.83.61.52 reserved, public ingress disabled |
 | Staging app | apps01, 3100/3101, two identical web containers and two workers |
-| Supabase | 10.10.10.30:8000; database/Studio local only; eleven healthy services |
+| Supabase | 10.10.10.30:8000; database local only; eleven healthy services |
 | Production candidate | koipond-prod:cec716496146e2b1597bd1674c3a4020e1f66763-candidate |
 | Candidate image ID | sha256:ec9b7352a0db0e90bfaf8187b051164ac64aba988d9f6953b00a7adac90de77a |
 | Inactive production runtime | controller recovery/koipond/production-env-prepared.vault |

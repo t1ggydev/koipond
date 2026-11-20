@@ -68,7 +68,7 @@ skip = False
 for line in (ROOT / 'upstream/volumes/api/kong.yml').read_text().splitlines():
     match = re.match(r'^  - name: (\S+)\s*$', line)
     if match:
-        skip = match.group(1) in ['dashboard', 'meta', 'mcp', 'mcp-blocker']
+        skip = match.group(1) in ['meta', 'mcp', 'mcp-blocker']
     if not skip:
         lines.append(line)
 (ROOT / 'kong.private.yml').write_text('\n'.join(lines) + '\n')
