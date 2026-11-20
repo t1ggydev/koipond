@@ -1,0 +1,42 @@
+{
+  "result": "PASS",
+  "snapshotAt": "2026-11-19T18:50:42.93964+00:00",
+  "tables": {
+    "participants": {
+      "md5": "d81ac182580816b71abe7c81a4fdf6ee",
+      "rows": 168
+    },
+    "streamers": {
+      "md5": "99bd0dff06ac95efe7cc83e0ce771235",
+      "rows": 2
+    },
+    "osu_stats": {
+      "md5": "c69ed5fc6524a934578cfcf3343a69c1",
+      "rows": 168
+    },
+    "settings": {
+      "md5": "d72f81b57a243d5055a64d82a28a5233",
+      "rows": 2
+    },
+    "presets": {
+      "md5": "d751713988987e9331980363e24189ce",
+      "rows": 0
+    },
+    "entries": {
+      "md5": "ded0a342894d9ea96c3e1b5214b690f3",
+      "rows": 5150
+    },
+    "draws": {
+      "md5": "cb9960d7e60b719d90822926d811e0c1",
+      "rows": 446
+    },
+    "winner_messages": {
+      "md5": "3c7bdad8ff7479c602ebe79664164617",
+      "rows": 3019
+    }
+  },
+  "baselineColumns": 85,
+  "migrations": 17,
+  "platformSchemasPreserved": true,
+  "privateQueuePreserved": true
+}

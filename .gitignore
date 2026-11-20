@@ -39,10 +39,18 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+__pycache__/
+*.pyc
 next-env.d.ts
 
 .vercel
 .env*.local
+/deploy/*.env
+*.clixml
+*.dpapi
+*.aesgcm.json
+*.vault
+.vault-pass
 
 # written by `next dev`
 AGENTS.md

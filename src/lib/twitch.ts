@@ -1,4 +1,5 @@
 import "server-only";
+import { boundedFetch as fetch } from "@/lib/boundedFetch";
 import { env } from "@/lib/env";
 
 const AUTHORIZE_URL = "https://id.twitch.tv/oauth2/authorize";

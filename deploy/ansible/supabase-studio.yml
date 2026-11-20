@@ -1,0 +1,67 @@
+- name: Enable authenticated Studio behind the existing private gateway
+  hosts: supabase01
+  gather_facts: false
+  tasks:
+    - name: Install reviewed gateway routes including authenticated Studio
+      ansible.builtin.copy:
+        src: ../supabase/kong.private.yml
+        dest: /srv/koipond-supabase/kong.private.yml
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      register: studio_routes
+    - name: Activate gateway configuration using its existing protected environment
+      ansible.builtin.command:
+        argv: [docker, restart, koipond-supabase-api-gw]
+      when: studio_routes.changed
+
+- name: Publish Studio only through the private HTTPS virtual host
+  hosts: edge01
+  gather_facts: false
+  tasks:
+    - name: Confirm gateway demands authentication before exposing Studio route
+      ansible.builtin.uri:
+        url: http://10.10.10.30:8000/
+        status_code: 401
+      register: studio_authentication
+      until: studio_authentication.status == 401
+      retries: 20
+      delay: 2
+    - name: Require HTTP Basic challenge
+      ansible.builtin.assert:
+        that: "'Basic' in studio_authentication.www_authenticate"
+    - name: Install private ingress with rollback on invalid configuration
+      block:
+        - ansible.builtin.copy:
+            src: studio-private-edge.conf
+            dest: /srv/koipond-edge/nginx/default.conf
+            mode: '0644'
+            backup: true
+          register: studio_ingress
+        - name: Read mounted ingress configuration to detect stale file bind mounts
+          ansible.builtin.command:
+            argv: [docker, exec, koipond-edge-nginx-1, cat, /etc/nginx/conf.d/default.conf]
+          register: mounted_ingress
+          changed_when: false
+        - name: Refresh the existing single-file bind mount when necessary
+          ansible.builtin.command:
+            argv: [docker, restart, koipond-edge-nginx-1]
+          when: mounted_ingress.stdout | trim != lookup('file', 'studio-private-edge.conf') | trim
+        - ansible.builtin.command:
+            argv: [docker, exec, koipond-edge-nginx-1, nginx, -t]
+          changed_when: false
+        - ansible.builtin.command:
+            argv: [docker, exec, koipond-edge-nginx-1, nginx, -s, reload]
+          when: studio_ingress.changed
+      rescue:
+        - ansible.builtin.copy:
+            src: '{{ studio_ingress.backup_file }}'
+            dest: /srv/koipond-edge/nginx/default.conf
+            remote_src: true
+          when: studio_ingress.backup_file is defined
+        - ansible.builtin.command:
+            argv: [docker, restart, koipond-edge-nginx-1]
+          when: studio_ingress.backup_file is defined
+        - ansible.builtin.fail:
+            msg: Private ingress validation failed; previous configuration restored.

@@ -1,0 +1,136 @@
+[
+  {
+    "name": "Prepare immutable canonical production image only",
+    "hosts": "koipond_apps",
+    "gather_facts": false,
+    "tasks": [
+      {
+        "name": "Require inactive production preparation with canonical public inputs",
+        "ansible.builtin.assert": {
+          "that": [
+            "koipond_prepare_production_image | default(false) | bool",
+            "koipond_image_ref is match('^koipond-prod:[a-f0-9]{40}-candidate$')",
+            "koipond_revision is match('^[a-f0-9]{40}$')",
+            "koipond_public_app_url == 'https://www.koipond.live'",
+            "koipond_public_api_url == 'https://koipond-api.kluge-it.tech'",
+            "koipond_public_anon_key | length > 20",
+            "koipond_server_actions_key | length > 20"
+          ]
+        },
+        "no_log": true
+      },
+      {
+        "name": "Create owned production build context",
+        "ansible.builtin.tempfile": {
+          "state": "directory",
+          "prefix": "koipond-prod-build-"
+        },
+        "register": "koipond_prod_context"
+      },
+      {
+        "block": [
+          {
+            "name": "Extract tested immutable source archive",
+            "ansible.builtin.unarchive": {
+              "src": "{{ koipond_source_archive }}",
+              "dest": "{{ koipond_prod_context.path }}"
+            }
+          },
+          {
+            "name": "Write transient production Server Actions BuildKit secret outside context",
+            "ansible.builtin.copy": {
+              "dest": "{{ koipond_prod_context.path }}.server-actions-key",
+              "mode": "0600",
+              "content": "{{ koipond_server_actions_key }}"
+            },
+            "no_log": true
+          },
+          {
+            "name": "Refuse to overwrite existing production candidate",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "image",
+                "inspect",
+                "{{ koipond_image_ref }}"
+              ]
+            },
+            "register": "candidate_exists",
+            "failed_when": "candidate_exists.rc not in [0,1]",
+            "changed_when": false,
+            "no_log": true
+          },
+          {
+            "name": "Build canonical production candidate without starting services",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "build",
+                "--secret",
+                "id=server_actions_key,src={{ koipond_prod_context.path }}.server-actions-key",
+                "--tag",
+                "{{ koipond_image_ref }}",
+                "--label",
+                "org.opencontainers.image.revision={{ koipond_revision }}",
+                "--label",
+                "koipond.environment=production-candidate",
+                "--build-arg",
+                "KOIPOND_REVISION={{ koipond_revision }}",
+                "--build-arg",
+                "NEXT_PUBLIC_APP_URL={{ koipond_public_app_url }}",
+                "--build-arg",
+                "NEXT_PUBLIC_SUPABASE_URL={{ koipond_public_api_url }}",
+                "--build-arg",
+                "NEXT_PUBLIC_SUPABASE_ANON_KEY={{ koipond_public_anon_key }}",
+                "{{ koipond_prod_context.path }}"
+              ]
+            },
+            "when": "candidate_exists.rc != 0",
+            "async": 1200,
+            "poll": 5,
+            "no_log": true
+          },
+          {
+            "name": "Inspect immutable candidate identity",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "image",
+                "inspect",
+                "{{ koipond_image_ref }}"
+              ]
+            },
+            "register": "candidate",
+            "changed_when": false,
+            "no_log": true
+          },
+          {
+            "name": "Record inactive candidate identity",
+            "ansible.builtin.copy": {
+              "dest": "/srv/koipond-staging/production-candidate.json",
+              "mode": "0600",
+              "content": "{{ {'image_ref': koipond_image_ref, 'image_id': (candidate.stdout | from_json)[0].Id, 'revision': koipond_revision, 'activated': false, 'canonical': koipond_public_app_url} | to_nice_json }}\n"
+            }
+          }
+        ],
+        "always": [
+          {
+            "name": "Remove transient production build key",
+            "ansible.builtin.file": {
+              "path": "{{ koipond_prod_context.path }}.server-actions-key",
+              "state": "absent"
+            },
+            "no_log": true
+          },
+          {
+            "name": "Remove owned production source context",
+            "ansible.builtin.file": {
+              "path": "{{ koipond_prod_context.path }}",
+              "state": "absent"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

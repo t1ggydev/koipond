@@ -1,0 +1,27 @@
+{
+  "result": "PASS",
+  "archive": "/var/backups/koipond-supabase/20261119T194507Z.tar.gz",
+  "databaseCount": 2,
+  "appRows": {
+    "participants": 168,
+    "streamers": 2,
+    "osu_stats": 168,
+    "settings": 2,
+    "presets": 0,
+    "entries": 5150,
+    "draws": 446,
+    "winner_messages": 3019
+  },
+  "checks": {
+    "migrations": 17,
+    "auth_schema": true,
+    "storage_schema": true,
+    "realtime_schema": true,
+    "anonymous_queue_execute": false
+  },
+  "network": "none",
+  "hostPorts": false,
+  "data": "tmpfs",
+  "globalsRestored": true,
+  "configurationHashesVerified": true
+}

@@ -1,0 +1,29 @@
+# Draft; not deployed. Use only with isolated staging resources.
+# docker compose --env-file deploy/staging.env -f deploy/compose.staging.yml ...
+name: koipond-staging
+services:
+  web:
+    image: koipond:staging
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?Set isolated staging APP URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?Set isolated staging Supabase URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?Set isolated staging anon key}
+    env_file:
+      - staging.env
+    environment:
+      NODE_ENV: production
+      ENABLE_DEMO: "false"
+    ports:
+      - "127.0.0.1:3100:3000"
+    init: true
+    restart: "no"
+    mem_limit: 1536m
+    cpus: 1.0
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s

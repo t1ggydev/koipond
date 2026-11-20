@@ -1,0 +1,26 @@
+{
+  "groups": [
+    {
+      "name": "koipond-staging",
+      "interval": "15s",
+      "rules": [
+        {
+          "record": "koipond_stage:active_users",
+          "expr": "max(koipond_active_users{job=\"koipond_stage\"})"
+        },
+        {
+          "record": "koipond_stage:active_streamers",
+          "expr": "max(koipond_active_streamers{job=\"koipond_stage\"})"
+        },
+        {
+          "record": "koipond_stage:http_requests:rate5m",
+          "expr": "sum(rate(koipond_http_requests_total{job=\"koipond_stage\"}[5m]))"
+        },
+        {
+          "record": "koipond_stage:queue_oldest_age_seconds",
+          "expr": "max(koipond_queue_oldest_age_seconds{job=\"koipond_stage\"})"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+- name: Protect the private Supabase stack with local backups for PBS
+  hosts: supabase01
+  become: true
+  tasks:
+    - name: Install root-only local backup runner
+      ansible.builtin.copy:
+        src: "{{ supabase_source }}/backup.py"
+        dest: /srv/koipond-supabase/backup.py
+        mode: '0700'
+    - name: Install local backup service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/koipond-supabase-backup.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Private Koipond Supabase database and storage backup
+          Requires=docker.service
+          After=docker.service koipond-supabase.service
+          [Service]
+          Type=oneshot
+          UMask=0077
+          ExecStart=/usr/bin/python3 /srv/koipond-supabase/backup.py
+          Nice=10
+          IOSchedulingClass=best-effort
+          IOSchedulingPriority=7
+    - name: Install daily backup timer before nightly PBS
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/koipond-supabase-backup.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Daily private Supabase recovery snapshot
+          [Timer]
+          OnCalendar=*-*-* 01:00:00
+          Persistent=true
+          RandomizedDelaySec=120
+          [Install]
+          WantedBy=timers.target
+    - name: Enable daily backups
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: koipond-supabase-backup.timer
+        enabled: true
+        state: started
+    - name: Create the initial complete local recovery snapshot
+      ansible.builtin.command: python3 /srv/koipond-supabase/backup.py
+      register: backup
+      changed_when: true
+    - ansible.builtin.debug:
+        var: backup.stdout
+    - name: Install isolated recovery probe
+      ansible.builtin.copy:
+        src: "{{ supabase_source }}/test-backup-restore.py"
+        dest: /srv/koipond-supabase/test-backup-restore.py
+        mode: '0700'
+    - name: Verify initial complete backup through isolated PostgreSQL17 recovery
+      ansible.builtin.command: python3 /srv/koipond-supabase/test-backup-restore.py
+      register: restore_probe
+      changed_when: false
+    - ansible.builtin.debug:
+        var: restore_probe.stdout
