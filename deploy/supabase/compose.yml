@@ -103,7 +103,7 @@ services:
     entrypoint:
     - /bin/sh
     - /home/kong/kong-entrypoint.sh
-    mem_limit: 512m
+    mem_limit: 1g
     logging:
       driver: local
       options:

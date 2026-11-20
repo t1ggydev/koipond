@@ -25,7 +25,7 @@ base = yaml.safe_load((ROOT / 'upstream/docker-compose.yml').read_text())
 kong = yaml.load((ROOT / 'upstream/docker-compose.kong.yml').read_text(), Loader=Loader)
 base['name'] = 'koipond-supabase'
 base['services']['api-gw'].update(deepcopy(kong['services']['api-gw']))
-limits = {'db': '2g', 'studio': '768m', 'api-gw': '512m', 'auth': '384m',
+limits = {'db': '2g', 'studio': '768m', 'api-gw': '1g', 'auth': '384m',
           'rest': '384m', 'realtime': '1g', 'storage': '512m', 'imgproxy': '256m',
           'meta': '384m', 'functions': '512m', 'supavisor': '768m'}
 for name, service in base['services'].items():
