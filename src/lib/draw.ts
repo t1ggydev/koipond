@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import {
   getEntrantFlags,
@@ -145,59 +146,83 @@ export async function pickWinner(
   criteria: DrawCriteria,
   triggeredBy: "dashboard" | "chat",
   ignoreOsuCriteria = false,
+  eventContext?: { messageId: string; session: number },
 ) {
-  const settings = await getEntrySettings(streamerId);
-  const [candidatesRaw, flags] = await Promise.all([
-    ignoreOsuCriteria
-      ? findAllEntrantCandidates(streamerId, settings)
-      : findEligibleParticipants(streamerId, criteria, settings),
-    getEntrantFlags(streamerId, settings),
-  ]);
-
-  let candidates = candidatesRaw;
-  if (settings.subscribersOnly) {
-    candidates = candidates.filter((c) => flags.get(c.twitchId)?.isSubscriber);
-  }
-  if (settings.uniqueWinners) {
-    const pastWinners = await getPastWinnerIds(streamerId, settings.entriesSession);
-    candidates = candidates.filter((c) => !pastWinners.has(c.twitchId));
-  }
-
-  if (candidates.length === 0) {
-    return { winner: null as Candidate | null, candidateCount: 0 };
-  }
-
-  const weights = candidates.map((c) => Math.max(weightFor(c, settings, flags), 0));
-  const winner = pickWeighted(candidates, weights);
-
+  const durable = process.env.KOIPOND_DURABLE_EVENTS === "true";
+  const sourceId = eventContext?.messageId ?? `dashboard:${randomUUID()}`;
   const db = supabaseAdmin();
-  const { data: draw, error } = await db
-    .from("draws")
-    .insert({
-      streamer_id: streamerId,
-      criteria,
-      session: settings.entriesSession,
-      winner_participant_id: winner.linked ? winner.id : null,
-      winner_twitch_id: winner.twitchId,
-      winner_twitch_display_name: winner.twitchDisplayName,
-      winner_osu_username: winner.osuUsername,
-      triggered_by: triggeredBy,
-      hide_osu_stats: settings.hideOsuStats,
-    })
-    .select("id")
-    .single();
-  if (error) throw error;
-
-  try {
-    await startWinnerChatCapture(streamerId, draw.id, winner.twitchId);
-  } catch (err) {
-    console.error("Arming winner chat capture failed", err);
+  if (durable) {
+    const { data: previous, error } = await db.from("draws")
+      .select("id, streamer_id, winner_participant_id, winner_twitch_id, winner_twitch_display_name, winner_osu_username")
+      .eq("source_event_id", sourceId).maybeSingle();
+    if (error) throw error;
+    if (previous) {
+      if (previous.streamer_id !== streamerId) throw new Error("draw_source_conflict");
+      return { winner: {
+        id: previous.winner_participant_id ?? `twitch:${previous.winner_twitch_id}`,
+        twitchId: previous.winner_twitch_id as string, twitchLogin: "",
+        twitchDisplayName: previous.winner_twitch_display_name as string,
+        osuUsername: previous.winner_osu_username as string | null,
+        linked: !!previous.winner_participant_id,
+      }, candidateCount: 0 };
+    }
   }
 
-  await broadcastToStreamer(streamerId, "entries");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const settings = await getEntrySettings(streamerId);
+    if (eventContext && eventContext.session !== settings.entriesSession) {
+      return { winner: null as Candidate | null, candidateCount: 0 };
+    }
+    const effectiveCriteria = durable && triggeredBy === "chat" ? settings.criteria : criteria;
+    const ignoreCriteria = durable && triggeredBy === "chat" ? settings.ignoreOsuCriteria : ignoreOsuCriteria;
+    const [candidatesRaw, flags] = await Promise.all([
+      ignoreCriteria ? findAllEntrantCandidates(streamerId, settings)
+        : findEligibleParticipants(streamerId, effectiveCriteria, settings),
+      getEntrantFlags(streamerId, settings),
+    ]);
+    let candidates = candidatesRaw;
+    if (settings.subscribersOnly) candidates = candidates.filter((candidate) => flags.get(candidate.twitchId)?.isSubscriber);
+    if (settings.uniqueWinners) {
+      const previous = await getPastWinnerIds(streamerId, settings.entriesSession);
+      candidates = candidates.filter((candidate) => !previous.has(candidate.twitchId));
+    }
+    if (!candidates.length) return { winner: null as Candidate | null, candidateCount: 0 };
+    const winner = pickWeighted(candidates, candidates.map((candidate) => Math.max(weightFor(candidate, settings, flags), 0)));
+    if (durable) {
+      const { data, error } = await db.rpc("koi_commit_draw", {
+        p_streamer_id: streamerId, p_session: settings.entriesSession, p_message_id: sourceId,
+        p_winner: winner, p_criteria: effectiveCriteria, p_triggered_by: triggeredBy,
+        p_hide_osu_stats: settings.hideOsuStats,
+        p_expected_updated_at: settings.updatedAt,
+      });
+      if (error?.code === "40001") continue;
+      if (error || !data) throw new Error("draw_commit_failed");
+      await broadcastToStreamer(streamerId, "entries");
+      return { winner: {
+        id: data.winner_participant_id ?? `twitch:${data.winner_twitch_id}`,
+        twitchId: data.winner_twitch_id as string, twitchLogin: winner.twitchLogin,
+        twitchDisplayName: data.winner_twitch_display_name as string,
+        osuUsername: (data.winner_osu_username ?? data.osu_username ?? null) as string | null,
+        linked: !!data.winner_participant_id,
+      }, candidateCount: candidates.length };
+    }
 
-  return { winner, candidateCount: candidates.length };
+    const { data: draw, error } = await db.from("draws").insert({
+      streamer_id: streamerId, criteria, session: settings.entriesSession,
+      winner_participant_id: winner.linked ? winner.id : null,
+      winner_twitch_id: winner.twitchId, winner_twitch_display_name: winner.twitchDisplayName,
+      winner_osu_username: winner.osuUsername, triggered_by: triggeredBy,
+      hide_osu_stats: settings.hideOsuStats,
+    }).select("id").single();
+    if (error) throw error;
+    try { await startWinnerChatCapture(streamerId, draw.id, winner.twitchId); }
+    catch { console.error("Arming winner chat capture failed"); }
+    await broadcastToStreamer(streamerId, "entries");
+    return { winner, candidateCount: candidates.length };
+  }
+  throw new Error("draw_concurrency_conflict");
 }
+
 
 export async function recordNumberWinner(
   streamerId: string,

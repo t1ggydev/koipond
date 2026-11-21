@@ -1,0 +1,110 @@
+pipeline {
+  agent { label 'koipond-build' }
+  options {
+    skipDefaultCheckout(true)
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    timestamps()
+  }
+  parameters {
+    booleanParam(name: 'DEPLOY_PRIVATE_STAGING', defaultValue: false,
+      description: 'Deploy only private Koipond staging after all tests. Never changes production DNS or Vercel.')
+  }
+  stages {
+    stage('Pin the exact SCM revision') {
+      steps {
+        script {
+          def source
+          def attempts = 0
+          retry(3) {
+            if (attempts++ > 0) sleep time: 15, unit: 'SECONDS'
+            source = checkout scm
+          }
+          if (!(source.GIT_COMMIT ==~ /^[a-f0-9]{40}$/)) {
+            error('SCM did not supply an exact commit identity')
+          }
+          env.KOIPOND_SOURCE_SHA = source.GIT_COMMIT
+        }
+      }
+    }
+    stage('Checkout, build and acceptance tests on existing controller') {
+      steps {
+        sh '''
+          set -eu
+          case "$BUILD_NUMBER" in ''|*[!0-9]*) exit 1;; esac
+          case "$KOIPOND_SOURCE_SHA" in ''|*[!a-f0-9]*) exit 1;; esac
+          test "${#KOIPOND_SOURCE_SHA}" -eq 40
+          case "$BUILD_TAG" in ''|*[!A-Za-z0-9_.-]*) exit 1;; esac
+          test "${#BUILD_TAG}" -le 64
+          ssh -T -i /var/lib/jenkins-agent/.ssh/id_ed25519 \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            jenkins-ci@10.1.0.101 "bash -se -- $KOIPOND_SOURCE_SHA $BUILD_TAG" <<'KOIPOND'
+          set -euo pipefail
+          umask 077
+          revision="$1"
+          run_id="$2"
+          root=/home/jenkins-ci/koipond-preparation
+          mkdir -p "$root"
+          exec 9>"$root/ci.lock"
+          flock -w 1800 9
+          if ! test -d "$root/repo/.git"; then
+            git clone https://github.com/t1ggydev/koipond.git "$root/repo"
+          fi
+          cd "$root/repo"
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags origin "$revision"
+          test "$(git rev-parse FETCH_HEAD)" = "$revision"
+          case "$revision" in *[!a-f0-9]*|'') exit 1;; esac
+          test "${#revision}" -eq 40
+          git checkout --detach "$revision"
+          mkdir -p "$root/artifacts" "$root/state/$run_id"
+          archive="$root/artifacts/koipond-$revision.tar.gz"
+          git archive --format=tar.gz --output="$archive" "$revision"
+          image_ref="koipond-prep:$revision-$run_id"
+          ansible-playbook -i deploy/ansible/inventory.staging.ini \
+            deploy/ansible/apps-build-test.yml \
+            --vault-password-file /home/jenkins-ci/.vault-pass \
+            -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
+            -e "koipond_revision=$revision" -e "koipond_source_archive=$archive" \
+            -e "koipond_image_ref=$image_ref"
+          echo "$revision" > "$root/state/$run_id/revision"
+          echo "$image_ref" > "$root/state/$run_id/image-ref"
+          KOIPOND
+        '''.stripIndent(10)
+      }
+    }
+    stage('Deploy private staging only') {
+      when { expression { params.DEPLOY_PRIVATE_STAGING && !env.CHANGE_ID } }
+      steps {
+        sh '''
+          set -eu
+          case "$BUILD_TAG" in ''|*[!A-Za-z0-9_.-]*) exit 1;; esac
+          ssh -T -i /var/lib/jenkins-agent/.ssh/id_ed25519 \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            jenkins-ci@10.1.0.101 "bash -se -- $KOIPOND_SOURCE_SHA $BUILD_TAG" <<'KOIPOND'
+          set -euo pipefail
+          umask 077
+          root=/home/jenkins-ci/koipond-preparation
+          exec 9>"$root/ci.lock"
+          flock -w 1800 9
+          revision=$(cat "$root/state/$2/revision")
+          image_ref=$(cat "$root/state/$2/image-ref")
+          test "$revision" = "$1"
+          cd "$root/repo"
+          git checkout --detach "$revision"
+          ansible-playbook -i deploy/ansible/inventory.staging.ini \
+            deploy/ansible/apps-deploy.yml \
+            --vault-password-file /home/jenkins-ci/.vault-pass \
+            -e @/home/jenkins-ci/koipond-secrets/staging.vault.yml \
+            -e "koipond_image_ref=$image_ref" -e koipond_deploy_staging=true
+          KOIPOND
+        '''.stripIndent(10)
+      }
+    }
+  }
+  post {
+    always {
+      echo 'Koipond preparation ended. Production cutover, main merge and DNS changes are never part of this pipeline.'
+    }
+  }
+}

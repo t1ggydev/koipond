@@ -18,7 +18,7 @@ export const env = {
     return required("NEXT_PUBLIC_APP_URL");
   },
   get supabaseUrl() {
-    return required("NEXT_PUBLIC_SUPABASE_URL");
+    return process.env.SUPABASE_INTERNAL_URL || required("NEXT_PUBLIC_SUPABASE_URL");
   },
   get supabaseAnonKey() {
     return required("NEXT_PUBLIC_SUPABASE_ANON_KEY");

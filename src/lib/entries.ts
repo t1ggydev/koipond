@@ -2,10 +2,14 @@ import "server-only";
 import { randomInt } from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { ensureSettingsRow } from "@/lib/streamers";
+import type { DrawCriteria } from "@/lib/draw";
 
 export type DrawMode = "keyword" | "number";
 
 export type EntrySettings = {
+  updatedAt: string;
+  numberDrawnAt: string | null;
+  criteria: DrawCriteria;
   triggerWord: string;
   drawMode: DrawMode;
   numberMin: number;
@@ -79,9 +83,12 @@ export type Entrant = {
 };
 
 const SETTINGS_COLUMNS =
-  "trigger_word, draw_mode, number_min, number_max, entries_open, entries_session, remove_spammers, unique_winners, chat_announcement, ignore_osu_criteria, subscribers_only, hide_osu_stats, viewer_luck_modifier, regular_luck_modifier, subscriber_luck_modifier, vip_luck_modifier, moderator_luck_modifier, regulars, chat_capture_draw_id, chat_capture_twitch_id, chat_capture_until";
+  "number_drawn_at, criteria, updated_at, trigger_word, draw_mode, number_min, number_max, entries_open, entries_session, remove_spammers, unique_winners, chat_announcement, ignore_osu_criteria, subscribers_only, hide_osu_stats, viewer_luck_modifier, regular_luck_modifier, subscriber_luck_modifier, vip_luck_modifier, moderator_luck_modifier, regulars, chat_capture_draw_id, chat_capture_twitch_id, chat_capture_until";
 
-type SettingsRow = {
+export type SettingsRow = {
+  updated_at: string;
+  number_drawn_at: string | null;
+  criteria: DrawCriteria;
   trigger_word: string;
   draw_mode: DrawMode;
   number_min: number;
@@ -105,8 +112,11 @@ type SettingsRow = {
   chat_capture_until: string | null;
 };
 
-function toEntrySettings(data: SettingsRow): EntrySettings {
+export function toEntrySettings(data: SettingsRow): EntrySettings {
   return {
+    updatedAt: data.updated_at,
+    numberDrawnAt: data.number_drawn_at,
+    criteria: data.criteria ?? {},
     triggerWord: data.trigger_word,
     drawMode: data.draw_mode,
     numberMin: data.number_min,

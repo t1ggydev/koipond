@@ -1,0 +1,19 @@
+- name: Increase private Supabase gateway memory without restarting services
+  hosts: supabase01
+  gather_facts: false
+  tasks:
+    - name: Persist gateway memory allowance in existing Compose configuration
+      ansible.builtin.replace:
+        path: /srv/koipond-supabase/compose.yml
+        regexp: '(?ms)(^  api-gw:\n(?:(?!^  [a-zA-Z0-9_-]+:).)*?^    mem_limit:) 512m$'
+        replace: '\g<1> 1g'
+        backup: true
+    - name: Read current gateway hard memory limit
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, '{{ "{{.HostConfig.Memory}}" }}', koipond-supabase-api-gw]
+      register: gateway_memory
+      changed_when: false
+    - name: Apply gateway allowance live while retaining a bounded swap allowance
+      ansible.builtin.command:
+        argv: [docker, update, --memory, 1g, --memory-swap, 2g, koipond-supabase-api-gw]
+      when: gateway_memory.stdout | trim != '1073741824'

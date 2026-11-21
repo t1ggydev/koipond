@@ -1,0 +1,346 @@
+[
+  {
+    "name": "Quiesce stage consumers before approved final sync",
+    "hosts": "koipond_apps",
+    "gather_facts": false,
+    "tags": [
+      "quiesce"
+    ],
+    "tasks": [
+      {
+        "name": "Require explicit final approval before stopping stage consumers",
+        "ansible.builtin.assert": {
+          "that": [
+            "koipond_go_live_approved | default(false) | bool",
+            "koipond_quiesce_for_final_sync | default(false) | bool"
+          ]
+        }
+      },
+      {
+        "name": "Stop stage statistics scheduler and running refresh before final data sync",
+        "ansible.builtin.systemd_service": {
+          "name": "{{ item }}",
+          "state": "stopped",
+          "enabled": false
+        },
+        "loop": [
+          "koipond-stats-refresh.timer",
+          "koipond-stats-refresh.service"
+        ]
+      },
+      {
+        "name": "Stop all stage web and worker processes before final sync",
+        "ansible.builtin.command": {
+          "argv": [
+            "docker",
+            "compose",
+            "-p",
+            "koipond-staging",
+            "-f",
+            "/srv/koipond-staging/compose.yml",
+            "stop",
+            "worker1",
+            "worker2",
+            "web1",
+            "web2"
+          ]
+        }
+      },
+      {
+        "name": "Record quiesced stage consumers",
+        "ansible.builtin.copy": {
+          "dest": "/srv/koipond-staging/final-sync-quiesced",
+          "content": "Stage workers and statistics scheduler stopped for explicitly approved final sync.\n",
+          "mode": "0600"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Activate separate production project only after approved final sync",
+    "hosts": "koipond_apps",
+    "gather_facts": false,
+    "tags": [
+      "deploy"
+    ],
+    "tasks": [
+      {
+        "name": "Require explicit approval, finished final sync and production-only image",
+        "ansible.builtin.assert": {
+          "that": [
+            "koipond_go_live_approved | default(false) | bool",
+            "koipond_final_sync_complete | default(false) | bool",
+            "koipond_production_image_ref is match('^koipond-prod:[a-f0-9]{40}-candidate$')",
+            "koipond_production_environment.NEXT_PUBLIC_APP_URL == 'https://www.koipond.live'",
+            "koipond_production_environment.ALLOWED_STREAMER_TWITCH_IDS not in ['', '0']"
+          ]
+        },
+        "no_log": true
+      },
+      {
+        "name": "Require explicit quiesce marker",
+        "ansible.builtin.stat": {
+          "path": "/srv/koipond-staging/final-sync-quiesced"
+        },
+        "register": "quiesced"
+      },
+      {
+        "name": "Inspect stage workers after final sync",
+        "ansible.builtin.command": {
+          "argv": [
+            "docker",
+            "compose",
+            "-p",
+            "koipond-staging",
+            "-f",
+            "/srv/koipond-staging/compose.yml",
+            "ps",
+            "--status",
+            "running",
+            "--services",
+            "worker1",
+            "worker2",
+            "web1",
+            "web2"
+          ]
+        },
+        "register": "stage_running",
+        "changed_when": false
+      },
+      {
+        "name": "Refuse production while stage consumers are active",
+        "ansible.builtin.assert": {
+          "that": [
+            "quiesced.stat.exists",
+            "stage_running.stdout | trim | length == 0"
+          ]
+        }
+      },
+      {
+        "name": "Inspect immutable production image",
+        "ansible.builtin.command": {
+          "argv": [
+            "docker",
+            "image",
+            "inspect",
+            "{{ koipond_production_image_ref }}"
+          ]
+        },
+        "register": "prod_image",
+        "no_log": true,
+        "changed_when": false
+      },
+      {
+        "name": "Resolve production image ID",
+        "ansible.builtin.set_fact": {
+          "koipond_production_image_id": "{{ (prod_image.stdout | from_json)[0].Id }}"
+        }
+      },
+      {
+        "name": "Require production candidate label",
+        "ansible.builtin.assert": {
+          "that": [
+            "(prod_image.stdout | from_json)[0].Config.Labels['koipond.environment'] == 'production-candidate'"
+          ]
+        }
+      },
+      {
+        "name": "Create separate production runtime root",
+        "ansible.builtin.file": {
+          "path": "/srv/koipond-production",
+          "state": "directory",
+          "mode": "0700"
+        }
+      },
+      {
+        "name": "Inspect predecessor",
+        "ansible.builtin.stat": {
+          "path": "/srv/koipond-production/compose.yml"
+        },
+        "register": "old_prod"
+      },
+      {
+        "name": "Create protected rollback directory",
+        "ansible.builtin.tempfile": {
+          "state": "directory",
+          "path": "/srv/koipond-production",
+          "prefix": "rollback-"
+        },
+        "register": "rollback"
+      },
+      {
+        "name": "Back up previous production runtime configuration",
+        "ansible.builtin.shell": "for f in compose.yml runtime.env worker.env; do if test -f /srv/koipond-production/$f; then cp -p /srv/koipond-production/$f {{ rollback.path }}/$f; fi; done",
+        "when": "old_prod.stat.exists",
+        "no_log": true
+      },
+      {
+        "block": [
+          {
+            "name": "Render runtime from protected production Vault variables",
+            "ansible.builtin.command": {
+              "argv": [
+                "python3",
+                "-c",
+                "import json,os,sys,pathlib\ne=json.load(sys.stdin)\nassert e['NEXT_PUBLIC_APP_URL']=='https://www.koipond.live'\nassert e['ENABLE_DEMO']=='false' and e['KOIPOND_DURABLE_EVENTS']=='true'\nassert e['ALLOWED_STREAMER_TWITCH_IDS'] not in ('','0')\nassert e['SUPABASE_INTERNAL_URL']=='http://10.10.10.30:8000'\ne['KOIPOND_WORKER_URLS']='http://web1:3000/api/internal/worker/run,http://web2:3000/api/internal/worker/run'\ndef quote(v):\n v=str(v);assert '\\n' not in v and '\\r' not in v\n return \"'\"+v.replace(\"'\",\"\\\\'\")+\"'\"\nr=pathlib.Path('/srv/koipond-production');os.umask(0o077)\nfor name,keys in [('runtime.env',list(e)),('worker.env',['KOIPOND_WORKER_URLS','KOIPOND_WORKER_TOKEN'])]:\n p=r/(name+'.new');p.write_text(''.join(k+'='+quote(e[k])+'\\n' for k in keys));p.chmod(0o600);p.replace(r/name)\n"
+              ],
+              "stdin": "{{ koipond_production_environment | to_json }}"
+            },
+            "no_log": true
+          },
+          {
+            "name": "Render separate production compose",
+            "ansible.builtin.copy": {
+              "dest": "/srv/koipond-production/compose.yml",
+              "mode": "0600",
+              "content": "name: koipond-production\nx-web: &web\n  image: \"{{ koipond_production_image_id }}\"\n  env_file: [runtime.env]\n  init: true\n  restart: unless-stopped\n  mem_limit: 1536m\n  cpus: 1.0\n  cap_drop: [ALL]\n  security_opt: [no-new-privileges:true]\n  stop_grace_period: 60s\n  logging:\n    driver: json-file\n    options: {max-size: 10m, max-file: \"3\"}\nx-worker: &worker\n  <<: *web\n  command: [node, /app/worker.mjs]\n  env_file: [worker.env]\n  mem_limit: 192m\n  cpus: 0.25\n  healthcheck:\n    test: [CMD, node, -e, \"process.kill(1,0)\"]\n    interval: 15s\n    timeout: 3s\n    retries: 3\n  depends_on:\n    web1: {condition: service_healthy}\n    web2: {condition: service_healthy}\nservices:\n  web1:\n    <<: *web\n    ports: [\"10.10.10.20:3200:3000\"]\n  web2:\n    <<: *web\n    ports: [\"10.10.10.20:3201:3000\"]\n  worker1:\n    <<: *worker\n  worker2:\n    <<: *worker\n"
+            }
+          },
+          {
+            "name": "Validate production compose",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "compose",
+                "-p",
+                "koipond-production",
+                "-f",
+                "/srv/koipond-production/compose.yml",
+                "config",
+                "--quiet"
+              ]
+            },
+            "no_log": true,
+            "changed_when": false
+          },
+          {
+            "name": "Activate production only after final approval",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "compose",
+                "-p",
+                "koipond-production",
+                "-f",
+                "/srv/koipond-production/compose.yml",
+                "up",
+                "-d",
+                "--no-build",
+                "--wait",
+                "--wait-timeout",
+                "120"
+              ]
+            },
+            "no_log": true
+          },
+          {
+            "name": "Verify each production web readiness using runtime Bearer token",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "compose",
+                "-p",
+                "koipond-production",
+                "-f",
+                "/srv/koipond-production/compose.yml",
+                "exec",
+                "-T",
+                "{{ item }}",
+                "node",
+                "-e",
+                "fetch('http://127.0.0.1:3000/health/ready',{headers:{authorization:'Bearer '+process.env.KOIPOND_MONITORING_TOKEN},signal:AbortSignal.timeout(10000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+              ]
+            },
+            "loop": [
+              "web1",
+              "web2"
+            ],
+            "changed_when": false
+          },
+          {
+            "name": "Write activated production manifest",
+            "ansible.builtin.copy": {
+              "dest": "/srv/koipond-production/active-release.json",
+              "mode": "0600",
+              "content": "{{ {'image_ref': koipond_production_image_ref, 'image_id': koipond_production_image_id, 'canonical': 'https://www.koipond.live'} | to_nice_json }}\n"
+            }
+          },
+          {
+            "name": "Install production statistics refresh unit",
+            "ansible.builtin.copy": {
+              "dest": "/etc/systemd/system/koipond-production-stats-refresh.service",
+              "mode": "0644",
+              "content": "[Unit]\nDescription=Refresh production Koipond statistics\nAfter=docker.service network-online.target\n[Service]\nType=oneshot\nTimeoutStartSec=300\nExecStart=/usr/bin/docker compose -p koipond-production -f /srv/koipond-production/compose.yml exec -T web1 node -e \"fetch('http://127.0.0.1:3000/api/cron/refresh-osu-stats',{headers:{authorization:'Bearer '+process.env.CRON_SECRET},signal:AbortSignal.timeout(270000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"\n"
+            }
+          },
+          {
+            "name": "Install production statistics refresh timer",
+            "ansible.builtin.copy": {
+              "dest": "/etc/systemd/system/koipond-production-stats-refresh.timer",
+              "mode": "0644",
+              "content": "[Unit]\nDescription=Refresh production statistics every thirty minutes\n[Timer]\nOnCalendar=*-*-* *:00,30:00\nRandomizedDelaySec=30\nPersistent=true\n[Install]\nWantedBy=timers.target\n"
+            }
+          },
+          {
+            "name": "Enable only production statistics scheduler",
+            "ansible.builtin.systemd_service": {
+              "name": "koipond-production-stats-refresh.timer",
+              "state": "started",
+              "enabled": true,
+              "daemon_reload": true
+            }
+          }
+        ],
+        "rescue": [
+          {
+            "name": "Stop failed initial production project only",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "compose",
+                "-p",
+                "koipond-production",
+                "-f",
+                "/srv/koipond-production/compose.yml",
+                "down"
+              ]
+            },
+            "when": "not old_prod.stat.exists",
+            "failed_when": false,
+            "no_log": true
+          },
+          {
+            "name": "Restore existing production configuration",
+            "ansible.builtin.shell": "for f in compose.yml runtime.env worker.env; do if test -f {{ rollback.path }}/$f; then cp -p {{ rollback.path }}/$f /srv/koipond-production/$f; fi; done",
+            "when": "old_prod.stat.exists",
+            "no_log": true
+          },
+          {
+            "name": "Restart predecessor only",
+            "ansible.builtin.command": {
+              "argv": [
+                "docker",
+                "compose",
+                "-p",
+                "koipond-production",
+                "-f",
+                "/srv/koipond-production/compose.yml",
+                "up",
+                "-d",
+                "--no-build",
+                "--wait"
+              ]
+            },
+            "when": "old_prod.stat.exists",
+            "no_log": true
+          },
+          {
+            "ansible.builtin.fail": {
+              "msg": "Production activation failed; previous production configuration restored where available. Stage consumers intentionally remain quiesced; assess data before explicitly resuming them."
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

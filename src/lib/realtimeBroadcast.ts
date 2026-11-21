@@ -1,4 +1,5 @@
 import "server-only";
+import { boundedFetch as fetch } from "@/lib/boundedFetch";
 import { env } from "@/lib/env";
 
 export type StreamerEvent = "entries" | "winner-chat" | "chat";
