@@ -4,10 +4,14 @@
 // retains raw URLs, query strings, headers, account names or response bodies.
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- Node --require preload is CommonJS.
 const http = require("node:http");
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node preload is CommonJS.
+const { randomUUID } = require("node:crypto");
 const key = Symbol.for("koipond.http.metrics");
 if (!globalThis[key]) {
   const boundaries = [.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10];
-  const store = { version: 1, boundaries, requests: new Map() };
+  // Counter resets can be invisible when the first post-restart value equals
+  // the last value. Keep each process lifetime in a separate Prometheus series.
+  const store = { version: 1, generation: randomUUID(), boundaries, requests: new Map() };
   globalThis[key] = store;
   const methods = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
   const under = (path, prefix) => path === prefix || path.startsWith(prefix + "/");

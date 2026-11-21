@@ -3,10 +3,16 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 
 createRequire(import.meta.url)("./http-metrics.cjs");
 const store = globalThis[Symbol.for("koipond.http.metrics")];
 assert(store && store.version === 1);
+assert.match(store.generation, /^[a-f0-9-]{36}$/);
+const otherGeneration = execFileSync(process.execPath, ["-e",
+  "require('./scripts/http-metrics.cjs'); process.stdout.write(globalThis[Symbol.for('koipond.http.metrics')].generation)"],
+  { encoding: "utf8" });
+assert.notEqual(otherGeneration, store.generation, "A restarted process must never reuse histogram counter identities");
 const server = createServer((request, response) => {
   const path = request.url.split("?", 1)[0];
   if (path.startsWith("/api/admin")) {
