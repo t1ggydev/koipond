@@ -66,7 +66,7 @@ try {
   const ts = createRequire(import.meta.url)("typescript");
   const renderer = ts.transpileModule(readFileSync("src/lib/httpMetrics.ts", "utf8")
     .replace('import "server-only";', ""),
-    { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exported = {};
   runInNewContext(renderer, { exports: exported, globalThis, Symbol, JSON });
   const exposition = exported.httpMetricsText();
