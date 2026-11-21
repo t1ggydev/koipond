@@ -73,6 +73,21 @@ pipeline {
         '''.stripIndent(10)
       }
     }
+    stage('Archive vulnerability inventory') {
+      steps {
+        sh '''
+          set -eu
+          mkdir -p security-reports
+          for kind in image source; do
+            scp -i /var/lib/jenkins-agent/.ssh/id_ed25519 \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "jenkins-ci@10.1.0.101:/home/jenkins-ci/koipond-preparation/artifacts/security-$kind-$KOIPOND_SOURCE_SHA.json" \
+              "security-reports/$kind.json"
+          done
+        '''
+        archiveArtifacts artifacts: 'security-reports/*.json', fingerprint: true
+      }
+    }
     stage('Deploy private staging only') {
       when { expression { params.DEPLOY_PRIVATE_STAGING && !env.CHANGE_ID } }
       steps {
