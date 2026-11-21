@@ -248,7 +248,7 @@
                 "{{ item }}",
                 "node",
                 "-e",
-                "fetch('http://127.0.0.1:3000/health/ready',{headers:{authorization:'Bearer '+process.env.KOIPOND_MONITORING_TOKEN},signal:AbortSignal.timeout(10000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+                "fetch('http://127.0.0.1:3000/health/ready',{headers:{authorization:'Bearer '+process.env.KOIPOND_MONITORING_TOKEN},signal:AbortSignal.timeout(10000)}).then(async r=>{if(!r.ok)process.exit(1);const d=await r.json();if(!Number.isInteger(d.refreshed)||!Number.isInteger(d.failed)||!Number.isInteger(d.remaining)||d.failed!==0||d.remaining!==0)process.exit(2)}).catch(()=>process.exit(1))"
               ]
             },
             "loop": [
@@ -270,7 +270,7 @@
             "ansible.builtin.copy": {
               "dest": "/etc/systemd/system/koipond-production-stats-refresh.service",
               "mode": "0644",
-              "content": "[Unit]\nDescription=Refresh production Koipond statistics\nAfter=docker.service network-online.target\n[Service]\nType=oneshot\nTimeoutStartSec=300\nExecStart=/usr/bin/docker compose -p koipond-production -f /srv/koipond-production/compose.yml exec -T web1 node -e \"fetch('http://127.0.0.1:3000/api/cron/refresh-osu-stats',{headers:{authorization:'Bearer '+process.env.CRON_SECRET},signal:AbortSignal.timeout(270000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"\n"
+              "content": "[Unit]\nDescription=Refresh production Koipond statistics\nAfter=docker.service network-online.target\n[Service]\nType=oneshot\nTimeoutStartSec=300\nExecStart=/usr/bin/docker compose -p koipond-production -f /srv/koipond-production/compose.yml exec -T web1 node -e \"fetch('http://127.0.0.1:3000/api/cron/refresh-osu-stats',{headers:{authorization:'Bearer '+process.env.CRON_SECRET},signal:AbortSignal.timeout(270000)}).then(async r=>{if(!r.ok)process.exit(1);const d=await r.json();if(!Number.isInteger(d.refreshed)||!Number.isInteger(d.failed)||!Number.isInteger(d.remaining)||d.failed!==0||d.remaining!==0)process.exit(2)}).catch(()=>process.exit(1))\"\n"
             }
           },
           {
