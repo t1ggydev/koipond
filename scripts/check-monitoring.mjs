@@ -4,6 +4,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 
 createRequire(import.meta.url)("./http-metrics.cjs");
 const store = globalThis[Symbol.for("koipond.http.metrics")];
@@ -58,6 +60,20 @@ try {
     assert.equal(sample.buckets.at(-1), sample.count);
     for (let i = 1; i < sample.buckets.length; i++) assert(sample.buckets[i] >= sample.buckets[i - 1]);
     assert(sample.sum >= 0 && Number.isFinite(sample.sum));
+  }
+  // Exercise the actual exposition renderer, including every finite/+Inf bucket,
+  // sum and count. A process identity only in the in-memory store is insufficient.
+  const ts = createRequire(import.meta.url)("typescript");
+  const renderer = ts.transpileModule(readFileSync("src/lib/httpMetrics.ts", "utf8")
+    .replace('import "server-only";', ""),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  const exported = {};
+  runInNewContext(renderer, { exports: exported, globalThis, Symbol, JSON });
+  const exposition = exported.httpMetricsText();
+  const counterLines = exposition.split("\n").filter((line) => /^koipond_http_(requests_total|request_duration_seconds_)/.test(line));
+  assert(counterLines.length > 0);
+  for (const line of counterLines) {
+    assert(line.includes(`process_generation="${store.generation}"`), "Every HTTP counter and bucket must carry the same process lifetime");
   }
   const metadata = JSON.stringify(samples);
   for (const sensitive of ["private-channel", "secret-oauth", "private-filter", "private-session", "private-oauth", "private-path", "private-name"]) {
