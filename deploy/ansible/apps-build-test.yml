@@ -93,6 +93,27 @@
             dest: "{{ koipond_build_root }}/last-tested-release.json"
             mode: '0600'
             content: "{{ {'revision': koipond_revision, 'image_ref': koipond_image_ref, 'image_id': (koipond_image_inspect.stdout | from_json)[0].Id, 'environment': 'staging', 'tests': 'queue-and-two-instance-pass'} | to_nice_json }}\n"
+        - name: Inventory known vulnerabilities in the exact build and source
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ koipond_context.path }}/scripts/check-vulnerabilities.py"
+              - --image
+              - "{{ koipond_image_ref }}"
+              - --revision
+              - "{{ koipond_revision }}"
+              - --source
+              - "{{ koipond_context.path }}"
+              - --output-dir
+              - "{{ koipond_build_root }}/security-reports"
+          async: 1500
+          poll: 5
+        - name: Collect security reports on the existing automation controller
+          ansible.builtin.fetch:
+            src: "{{ koipond_build_root }}/security-reports/security-{{ item }}-{{ koipond_revision }}.json"
+            dest: "/home/jenkins-ci/koipond-preparation/artifacts/security-{{ item }}-{{ koipond_revision }}.json"
+            flat: true
+          loop: [image, source]
       always:
         - name: Remove transient server action BuildKit secret
           ansible.builtin.file:
