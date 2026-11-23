@@ -6,6 +6,13 @@ const AUTHORIZE_URL = "https://osu.ppy.sh/oauth/authorize";
 const TOKEN_URL = "https://osu.ppy.sh/oauth/token";
 const API_URL = "https://osu.ppy.sh/api/v2";
 
+export class OsuProfileNotFoundError extends Error {
+  constructor() {
+    super("osu! get profile failed: 404");
+    this.name = "OsuProfileNotFoundError";
+  }
+}
+
 export type OsuMe = {
   id: number;
   username: string;
@@ -132,7 +139,8 @@ export async function fetchOsuStats(osuUserId: number): Promise<OsuStats> {
   ]);
 
   if (!profileRes.ok) {
-    throw new Error(`osu! get profile failed: ${profileRes.status} ${await profileRes.text()}`);
+    if (profileRes.status === 404) throw new OsuProfileNotFoundError();
+    throw new Error(`osu! get profile failed: ${profileRes.status}`);
   }
   const profile = await profileRes.json();
   const stats = profile.statistics ?? {};
