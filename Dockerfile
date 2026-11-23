@@ -17,7 +17,7 @@ COPY . .
 RUN --mount=type=secret,id=server_actions_key \
     if [ -f /run/secrets/server_actions_key ]; then \
       export NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$(cat /run/secrets/server_actions_key)"; \
-    fi; npm run lint && npm run build
+    fi; npm run lint && node scripts/check-osu-refresh.mjs && npm run build
 
 FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS runner
 # Runtime needs Node only; npm remains in the build stages.

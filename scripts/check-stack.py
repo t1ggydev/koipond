@@ -85,7 +85,7 @@ def main():
         psql = ["docker", "exec", "-i", database, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres"]
         run(psql, input="CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS; CREATE PUBLICATION supabase_realtime;")
         migrations = sorted((ROOT / "supabase/migrations").glob("*.sql"))
-        assert len(migrations) == 17
+        assert len(migrations) == 18
         for migration in migrations:
             run(psql, input="BEGIN;\n" + migration.read_text() + "\nCOMMIT;")
         start("postgrest", POSTGREST, env={
