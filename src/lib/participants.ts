@@ -47,6 +47,8 @@ export async function linkParticipant(session: Session, osu: OsuMe) {
         twitch_display_name: session.twitchDisplayName,
         osu_id: osu.id,
         osu_username: osu.username,
+        // A fresh, authenticated link allows automatic refreshes again.
+        osu_profile_missing_at: null,
       },
       { onConflict: "twitch_id" },
     )

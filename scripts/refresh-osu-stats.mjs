@@ -45,11 +45,14 @@ const headers = { Authorization: `Bearer ${access_token}` };
 const { data: participants, error } = await db
   .from("participants")
   .select("id, osu_id, osu_username")
-  .not("osu_id", "is", null);
+  .not("osu_id", "is", null)
+  .is("osu_profile_missing_at", null);
 if (error) throw error;
 
 console.log(`Refreshing ${participants.length} participants on ${new URL(env.NEXT_PUBLIC_SUPABASE_URL).host}…`);
 let changed = 0;
+let failed = 0;
+let skippedMissing = 0;
 
 for (const [i, p] of participants.entries()) {
   try {
@@ -58,8 +61,15 @@ for (const [i, p] of participants.entries()) {
       fetch(`${API_URL}/users/${p.osu_id}/scores/best?mode=osu&limit=1`, { headers }),
     ]);
     if (!profileRes.ok) {
-      console.warn(`  ${p.osu_username}: profile ${profileRes.status}, skipped`);
-      continue;
+      if (profileRes.status === 404) {
+        const { error: missingError } = await db.from("participants")
+          .update({ osu_profile_missing_at: new Date().toISOString() })
+          .eq("id", p.id).eq("osu_id", p.osu_id);
+        if (missingError) throw missingError;
+        skippedMissing++;
+        continue;
+      }
+      throw new Error(`osu! get profile failed: ${profileRes.status}`);
     }
     const profile = await profileRes.json();
     const stats = profile.statistics ?? {};
@@ -112,10 +122,13 @@ for (const [i, p] of participants.entries()) {
 
     console.log(`  [${i + 1}/${participants.length}] ${p.osu_username}: ${topPlaySr?.toFixed(2) ?? "—"}★${modLabel}`);
   } catch (err) {
-    console.warn(`  ${p.osu_username}: failed --`, String(err).slice(0, 120));
+    failed++;
+    console.error("osu! stats refresh failed", err);
   }
 
   await new Promise((r) => setTimeout(r, DELAY_MS));
 }
 
 console.log(`Done. ${changed} of ${participants.length} had a mod-adjusted star rating.`);
+console.log(JSON.stringify({ failed, skippedMissing }));
+if (failed > 0) process.exitCode = 1;

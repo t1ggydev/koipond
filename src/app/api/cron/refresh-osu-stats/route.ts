@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
-import { fetchOsuStats } from "@/lib/osu";
+import { fetchOsuStats, OsuProfileNotFoundError } from "@/lib/osu";
 import { saveOsuStats } from "@/lib/participants";
 import { randomUUID } from "node:crypto";
 import { acquireLease, releaseLease, durableEventsEnabled } from "@/lib/operationalQueue";
@@ -38,7 +38,8 @@ async function refresh(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin()
     .from("participants")
-    .select("id, osu_id, osu_username, osu_stats(updated_at)");
+    .select("id, osu_id, osu_username, osu_stats(updated_at)")
+    .is("osu_profile_missing_at", null);
   if (error) throw error;
 
   const queue = (data as Row[] | null ?? [])
@@ -56,6 +57,7 @@ async function refresh(req: NextRequest) {
 
   let refreshed = 0;
   let failed = 0;
+  let skippedMissing = 0;
   let processed = 0;
 
   for (const participant of queue) {
@@ -67,6 +69,21 @@ async function refresh(req: NextRequest) {
       await saveOsuStats(participant.id, await fetchOsuStats(participant.osuId));
       refreshed++;
     } catch (err) {
+      if (err instanceof OsuProfileNotFoundError) {
+        // Guard against a concurrent OAuth relink to a different osu! account.
+        const { error: missingError } = await supabaseAdmin()
+          .from("participants")
+          .update({ osu_profile_missing_at: new Date().toISOString() })
+          .eq("id", participant.id)
+          .eq("osu_id", participant.osuId);
+        if (!missingError) {
+          skippedMissing++;
+          continue;
+        }
+        failed++;
+        console.error("osu! missing profile state could not be saved", missingError);
+        continue;
+      }
       failed++;
       console.error(`osu! stats refresh failed for ${participant.osuUsername}`, err);
     }
@@ -75,6 +92,7 @@ async function refresh(req: NextRequest) {
   const result = {
     refreshed,
     failed,
+    skippedMissing,
     remaining: (data?.length ?? 0) - processed,
     durationMs: Date.now() - startedAt,
   };
