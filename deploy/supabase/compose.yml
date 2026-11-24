@@ -297,7 +297,7 @@ services:
         max-file: '3'
   imgproxy:
     container_name: koipond-supabase-imgproxy
-    image: darthsim/imgproxy:v4.0.21
+    image: darthsim/imgproxy:v4.0.25
     restart: unless-stopped
     volumes:
     - ./data/storage:/var/lib/storage:z
