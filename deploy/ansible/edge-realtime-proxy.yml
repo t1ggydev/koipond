@@ -10,10 +10,13 @@
         mode: '0644'
         backup: true
     - block:
-        - name: Include only in the canonical public Koipond server
+        # This existing fragment is included only by the public Koipond server.
+        # Its parent directory is mounted, so atomic file updates are visible
+        # without recreating the shared ingress container's single-file mount.
+        - name: Include in the existing canonical Koipond server fragment
           ansible.builtin.lineinfile:
-            path: /srv/koipond-edge/nginx/default.conf
-            insertafter: '^ server_name www\.koipond\.live;$'
+            path: /srv/koipond-edge/production-tls/operations/koipond-errors.conf
+            insertafter: EOF
             line: ' include /etc/nginx/production-tls/koipond-realtime.conf;'
             backup: true
           register: edge_config
@@ -27,7 +30,7 @@
         - name: Restore the previous valid configuration when validation fails
           ansible.builtin.copy:
             src: '{{ edge_config.backup_file }}'
-            dest: /srv/koipond-edge/nginx/default.conf
+            dest: /srv/koipond-edge/production-tls/operations/koipond-errors.conf
             remote_src: true
             mode: '0644'
           when: edge_config.backup_file is defined
