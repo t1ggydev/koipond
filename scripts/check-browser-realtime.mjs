@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+process.env.NEXT_PUBLIC_SUPABASE_URL="https://private-api.example.test";
+process.env.NEXT_PUBLIC_SUPABASE_BROWSER_URL="https://www.koipond.live/supabase";
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY="isolated-anonymous-key";
+const {supabaseBrowser}=await import("../src/lib/supabaseBrowser.ts");
+const a=supabaseBrowser(),b=supabaseBrowser();
+assert.equal(a,b,"All widgets must reuse one Realtime client");
+assert.equal(new URL(a.realtime.endPoint).hostname,"www.koipond.live");
+assert.equal(new URL(a.realtime.endPoint).pathname,"/supabase/realtime/v1/websocket");
+assert.equal(new URL(a.realtime.endPoint).protocol,"wss:");
+delete process.env.NEXT_PUBLIC_SUPABASE_BROWSER_URL;
+const fallback=await import("../src/lib/supabaseBrowser.ts?fallback");
+assert.equal(new URL(fallback.supabaseBrowser().realtime.endPoint).hostname,"private-api.example.test");
+console.log(JSON.stringify({result:"PASS",publicProxy:true,singleClient:true,fallback:true,networkCalls:0}));

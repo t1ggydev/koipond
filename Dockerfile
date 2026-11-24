@@ -7,17 +7,19 @@ RUN npm ci --no-audit --no-fund
 FROM dependencies AS builder
 ARG NEXT_PUBLIC_APP_URL
 ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_BROWSER_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG KOIPOND_REVISION
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \
     NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
+    NEXT_PUBLIC_SUPABASE_BROWSER_URL=$NEXT_PUBLIC_SUPABASE_BROWSER_URL \
     NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \
     NEXT_DEPLOYMENT_ID=$KOIPOND_REVISION
 COPY . .
 RUN --mount=type=secret,id=server_actions_key \
     if [ -f /run/secrets/server_actions_key ]; then \
       export NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$(cat /run/secrets/server_actions_key)"; \
-    fi; npm run lint && node scripts/check-osu-refresh.mjs && npm run build
+    fi; npm run lint && node scripts/check-osu-refresh.mjs && node scripts/check-worker-latency.mjs && node scripts/check-browser-realtime.mjs && npm run build
 
 FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS runner
 # Runtime needs Node only; npm remains in the build stages.
