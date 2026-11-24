@@ -14,7 +14,7 @@ const lifetime = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => lifetime.abort());
 let index = 0;
 while (!lifetime.signal.aborted) {
-  let wait = 1000;
+  let wait = 250;
   try {
     const response = await fetch(urls[index++ % urls.length], {
       method: "POST", headers: { Authorization: `Bearer ${token}` }, redirect: "error",
@@ -22,7 +22,7 @@ while (!lifetime.signal.aborted) {
     });
     if (response.ok) {
       const result = await response.json();
-      wait = result.processed ? 100 : 1000;
+      wait = result.processed ? 0 : 250;
     } else {
       console.error("Worker request failed", response.status);
       wait = 2000;

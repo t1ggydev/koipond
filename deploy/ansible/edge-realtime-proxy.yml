@@ -1,0 +1,38 @@
+- name: Public Realtime proxy on the Koipond application origin
+  hosts: koipond_edge
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install the narrowly scoped Realtime location
+      ansible.builtin.copy:
+        src: files/koipond-realtime.conf
+        dest: /srv/koipond-edge/production-tls/koipond-realtime.conf
+        mode: '0644'
+        backup: true
+    - block:
+        # This existing fragment is included only by the public Koipond server.
+        # Its parent directory is mounted, so atomic file updates are visible
+        # without recreating the shared ingress container's single-file mount.
+        - name: Include in the existing canonical Koipond server fragment
+          ansible.builtin.lineinfile:
+            path: /srv/koipond-edge/production-tls/operations/koipond-errors.conf
+            insertafter: EOF
+            line: ' include /etc/nginx/production-tls/koipond-realtime.conf;'
+            backup: true
+          register: edge_config
+        - name: Validate the complete running configuration
+          ansible.builtin.command: docker compose -f /srv/koipond-edge/compose.yml exec -T nginx nginx -t
+          changed_when: false
+        - name: Reload without restarting shared ingress
+          ansible.builtin.command: docker compose -f /srv/koipond-edge/compose.yml exec -T nginx nginx -s reload
+          changed_when: true
+      rescue:
+        - name: Restore the previous valid configuration when validation fails
+          ansible.builtin.copy:
+            src: '{{ edge_config.backup_file }}'
+            dest: /srv/koipond-edge/production-tls/operations/koipond-errors.conf
+            remote_src: true
+            mode: '0644'
+          when: edge_config.backup_file is defined
+        - ansible.builtin.fail:
+            msg: Realtime ingress validation failed; previous config restored.
