@@ -1,4 +1,4 @@
-FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS dependencies
+FROM node:24.22.3-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530 AS dependencies
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
@@ -21,7 +21,7 @@ RUN --mount=type=secret,id=server_actions_key \
       export NEXT_SERVER_ACTIONS_ENCRYPTION_KEY="$(cat /run/secrets/server_actions_key)"; \
     fi; npm run lint && node scripts/check-osu-refresh.mjs && node scripts/check-worker-latency.mjs && node scripts/check-browser-realtime.mjs && npm run build
 
-FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS runner
+FROM node:24.22.3-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530 AS runner
 # Runtime needs Node only; npm remains in the build stages.
 # Remove its unused attack surface and apply supported Debian security updates.
 RUN apt-get update \
