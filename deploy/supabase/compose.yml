@@ -323,7 +323,7 @@ services:
         max-file: '3'
   meta:
     container_name: koipond-supabase-meta
-    image: supabase/postgres-meta:v0.100.0
+    image: supabase/postgres-meta:v0.100.1
     restart: unless-stopped
     depends_on:
       db:
