@@ -81,6 +81,8 @@
                 "--build-arg",
                 "NEXT_PUBLIC_SUPABASE_URL={{ koipond_public_api_url }}",
                 "--build-arg",
+                "NEXT_PUBLIC_SUPABASE_BROWSER_URL={{ koipond_public_browser_api_url | default(koipond_public_app_url + '/supabase') }}",
+                "--build-arg",
                 "NEXT_PUBLIC_SUPABASE_ANON_KEY={{ koipond_public_anon_key }}",
                 "{{ koipond_prod_context.path }}"
               ]
